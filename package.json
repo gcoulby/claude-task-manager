@@ -12,7 +12,9 @@
     "lint": "eslint .",
     "typecheck": "tsc -b --noEmit",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "bump": "node scripts/bump-version.mjs",
+    "check-version": "node scripts/check-version.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
