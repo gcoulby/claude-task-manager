@@ -4,7 +4,7 @@ pub mod error;
 pub mod ingest;
 mod state;
 
-use std::sync::Mutex;
+use std::sync::{Mutex, mpsc};
 
 use tauri::Manager;
 
@@ -23,14 +23,16 @@ pub fn run() {
                 Err(e) => (None, Some(e.to_string())),
             };
             let can_ingest = conn.is_some();
+            let (ingest_tx, ingest_rx) = mpsc::channel();
             app.manage(AppState {
                 db_path,
                 db: Mutex::new(conn),
                 db_error,
                 ingest: Mutex::new(IngestState::Idle),
+                ingest_tx: ingest_tx.clone(),
             });
             if can_ingest {
-                ingest::runner::spawn_initial_scan(app.handle().clone());
+                ingest::runner::spawn(app.handle().clone(), ingest_tx, ingest_rx);
             }
             Ok(())
         })

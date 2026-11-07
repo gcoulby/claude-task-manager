@@ -2,11 +2,13 @@
 
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::sync::mpsc::Sender;
 
 use rusqlite::Connection;
 use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
+use crate::ingest::runner::IngestMsg;
 use crate::ingest::scanner::{ScanProgress, ScanSummary};
 
 pub struct AppState {
@@ -15,6 +17,8 @@ pub struct AppState {
     pub db: Mutex<Option<Connection>>,
     pub db_error: Option<String>,
     pub ingest: Mutex<IngestState>,
+    /// Wakes the ingest thread, for example to rescan after a settings change.
+    pub ingest_tx: Sender<IngestMsg>,
 }
 
 impl AppState {
@@ -45,6 +49,8 @@ pub enum IngestState {
     },
     Ready {
         summary: ScanSummary,
+        root: String,
+        root_exists: bool,
     },
     Failed {
         message: String,

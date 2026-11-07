@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AppError, AppInfo } from "@/types/app";
-import type { IngestState } from "@/types/ingest";
+import type { ArchiveChanged, IngestState } from "@/types/ingest";
 
 function isAppError(value: unknown): value is AppError {
   return (
@@ -32,4 +32,6 @@ export const api = {
 export const events = {
   onIngestState: (handler: (state: IngestState) => void): Promise<UnlistenFn> =>
     listen<IngestState>("ingest://state", (e) => handler(e.payload)),
+  onArchiveChanged: (handler: (change: ArchiveChanged) => void): Promise<UnlistenFn> =>
+    listen<ArchiveChanged>("archive://changed", (e) => handler(e.payload)),
 };

@@ -27,6 +27,8 @@ thiserror = "2"
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 regex = "1.13.1"
 dirs = "7.0.0"
+notify = "8.2.1"
+notify-debouncer-mini = "0.7.0"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

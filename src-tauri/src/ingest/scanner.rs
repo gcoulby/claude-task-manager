@@ -240,6 +240,86 @@ fn read_agent_meta(path: &Path) -> AgentMeta {
     }
 }
 
+/// Maps a changed path (from the watcher) to the transcript it belongs to.
+/// A subagent's meta.json maps to its transcript. Anything else is ignored.
+pub fn classify_path(root: &Path, path: &Path) -> Option<SourceFile> {
+    let rel = path.strip_prefix(root).ok().or_else(|| {
+        // FSEvents reports resolved paths, so a root reached through a
+        // symlink needs its canonical form to match.
+        let canonical = root.canonicalize().ok()?;
+        path.strip_prefix(canonical).ok()
+    })?;
+    let parts: Vec<String> = rel
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    match parts.as_slice() {
+        [project, file] => {
+            let session_id = file.strip_suffix(".jsonl")?;
+            Some(SourceFile {
+                path: root.join(project).join(file),
+                session_id: session_id.to_string(),
+                agent_id: None,
+                project_dir: project.clone(),
+            })
+        }
+        [project, session, sub, file] if sub == "subagents" => {
+            let agent_id = file
+                .strip_prefix("agent-")?
+                .strip_suffix(".meta.json")
+                .or_else(|| file.strip_prefix("agent-")?.strip_suffix(".jsonl"))?;
+            Some(SourceFile {
+                path: root
+                    .join(project)
+                    .join(session)
+                    .join(sub)
+                    .join(format!("agent-{agent_id}.jsonl")),
+                session_id: session.clone(),
+                agent_id: Some(agent_id.to_string()),
+                project_dir: project.clone(),
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Ingests only the files behind a batch of changed paths and rebuilds the
+/// sessions they belong to. Returns those session ids.
+pub fn ingest_changed(
+    conn: &mut Connection,
+    root: &Path,
+    paths: &[PathBuf],
+) -> AppResult<Vec<String>> {
+    let mut sources: Vec<SourceFile> = paths
+        .iter()
+        .filter_map(|p| classify_path(root, p))
+        .collect();
+    sources.sort_by(|a, b| a.path.cmp(&b.path));
+    sources.dedup_by(|a, b| a.path == b.path);
+
+    let mut touched = BTreeSet::new();
+    let mut any_gone = false;
+    for src in &sources {
+        if !src.path.exists() {
+            any_gone = true;
+            continue;
+        }
+        // A file that vanishes or locks mid-read is retried on its next change.
+        if let Ok(o) = ingest_file(conn, src)
+            && o.read
+        {
+            touched.insert(src.session_id.clone());
+        }
+    }
+    if any_gone {
+        touched.extend(queries::refresh_missing(conn, |p| Path::new(p).exists())?);
+    }
+    for session_id in &touched {
+        derive::rebuild_session(conn, session_id)?;
+    }
+    Ok(touched.into_iter().collect())
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanProgress {
@@ -481,6 +561,78 @@ mod tests {
                 "SELECT COUNT(*) FROM entries WHERE session_id LIKE '%004'"
             ),
             before
+        );
+        assert_eq!(
+            count(
+                &conn,
+                "SELECT source_missing FROM sessions WHERE id LIKE '%004'"
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn classifies_watched_paths() {
+        let root = Path::new("/r");
+        let main = classify_path(root, Path::new("/r/proj/s1.jsonl")).unwrap();
+        assert_eq!((main.session_id.as_str(), main.agent_id), ("s1", None));
+
+        let sub = classify_path(root, Path::new("/r/proj/s1/subagents/agent-ab.jsonl")).unwrap();
+        assert_eq!(sub.agent_id.as_deref(), Some("ab"));
+        let meta =
+            classify_path(root, Path::new("/r/proj/s1/subagents/agent-ab.meta.json")).unwrap();
+        assert_eq!(meta.path, sub.path);
+
+        for ignored in [
+            "/r/proj/memory/notes.md",
+            "/r/proj/s1/tool-results/x.txt",
+            "/r/proj",
+            "/elsewhere/proj/s1.jsonl",
+        ] {
+            assert_eq!(classify_path(root, Path::new(ignored)), None, "{ignored}");
+        }
+    }
+
+    #[test]
+    fn ingest_changed_reads_only_the_changed_session() {
+        let dir = fixture_copy();
+        let mut conn = db::open_in_memory();
+        scan(&mut conn, dir.path(), |_| {}).unwrap();
+
+        let path = dir
+            .path()
+            .join("-Users-alex-code-demo-app/00000000-0000-4000-8000-000000000002.jsonl");
+        let mut f = OpenOptions::new().append(true).open(&path).unwrap();
+        f.write_all(b"{\"type\":\"assistant\",\"uuid\":\"w1\",\"message\":{\"id\":\"m\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n").unwrap();
+        drop(f);
+        let unrelated = dir.path().join("-Users-alex-code-demo-app/memory.md");
+        fs::write(&unrelated, "x").unwrap();
+
+        let touched =
+            ingest_changed(&mut conn, dir.path(), &[path.clone(), path, unrelated]).unwrap();
+        assert_eq!(
+            touched,
+            vec!["00000000-0000-4000-8000-000000000002".to_string()]
+        );
+        assert_eq!(
+            count(&conn, "SELECT COUNT(*) FROM entries WHERE uuid = 'w1'"),
+            1
+        );
+    }
+
+    #[test]
+    fn ingest_changed_flags_deleted_files() {
+        let dir = fixture_copy();
+        let mut conn = db::open_in_memory();
+        scan(&mut conn, dir.path(), |_| {}).unwrap();
+        let path = dir
+            .path()
+            .join("-Users-alex-code-my-app/00000000-0000-4000-8000-000000000004.jsonl");
+        fs::remove_file(&path).unwrap();
+        let touched = ingest_changed(&mut conn, dir.path(), &[path]).unwrap();
+        assert_eq!(
+            touched,
+            vec!["00000000-0000-4000-8000-000000000004".to_string()]
         );
         assert_eq!(
             count(

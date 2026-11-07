@@ -19,5 +19,10 @@ export interface ScanSummary {
 export type IngestState =
   | { phase: "idle" }
   | { phase: "scanning"; progress: ScanProgress }
-  | { phase: "ready"; summary: ScanSummary }
+  | { phase: "ready"; summary: ScanSummary; root: string; rootExists: boolean }
   | { phase: "failed"; message: string };
+
+/** Mirrors `ingest::runner::ArchiveChanged`. An empty list means anything may have changed. */
+export interface ArchiveChanged {
+  sessionIds: string[];
+}

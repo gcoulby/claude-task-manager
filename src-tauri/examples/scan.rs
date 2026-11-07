@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use claude_task_manager_lib::{db, ingest::scanner};
+use claude_task_manager_lib::{db, ingest::derive, ingest::scanner};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
@@ -32,6 +32,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         again.files_read,
         started.elapsed()
     );
+
+    // Live updates rebuild the whole session, so the largest one is the worst case.
+    let (biggest, n): (String, i64) = conn.query_row(
+        "SELECT session_id, COUNT(*) FROM entries GROUP BY session_id ORDER BY 2 DESC LIMIT 1",
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    let started = Instant::now();
+    derive::rebuild_session(&mut conn, &biggest)?;
+    println!("rebuild of largest session ({n} entries) {:.2?}", started.elapsed());
 
     let count = |sql: &str| -> rusqlite::Result<i64> { conn.query_row(sql, [], |r| r.get(0)) };
     println!("sessions {}", count("SELECT COUNT(*) FROM sessions")?);

@@ -9,11 +9,20 @@ function describe(state: IngestState | null): { text: string; tone: "muted" | "e
       return { text: `Reading transcripts: ${filesDone} of ${filesTotal} files`, tone: "muted" };
     }
     case "ready": {
+      if (!state.rootExists) {
+        return {
+          text: `No Claude Code session folder at ${state.root}. Waiting for it to appear.`,
+          tone: "muted",
+        };
+      }
       const { files, errors, malformedLines } = state.summary;
       const problems = errors.length + malformedLines;
       return problems > 0
-        ? { text: `${files} files archived, ${problems} could not be read`, tone: "error" }
-        : { text: `${files} files archived`, tone: "muted" };
+        ? {
+            text: `${files} files archived, ${problems} could not be read. Watching for changes.`,
+            tone: "error",
+          }
+        : { text: `${files} files archived. Watching for changes.`, tone: "muted" };
     }
     case "failed":
       return { text: state.message, tone: "error" };
