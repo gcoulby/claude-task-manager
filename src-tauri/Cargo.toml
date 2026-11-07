@@ -3,6 +3,7 @@ name = "claude-task-manager"
 version = "0.1.0"
 description = "Desktop viewer for Claude Code agent sessions"
 authors = ["gcoulby"]
+license = "MIT"
 edition = "2024"
 rust-version = "1.90"
 

@@ -42,3 +42,7 @@ The installers are not yet code signed by Apple or Microsoft, so expect:
 
 - **macOS:** Gatekeeper says the app cannot be opened. Right-click the app, choose **Open**, then confirm.
 - **Windows:** SmartScreen shows "Windows protected your PC". Choose **More info**, then **Run anyway**.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).
