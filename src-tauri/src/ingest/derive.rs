@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use rusqlite::{Connection, params};
 
-use super::parser::EntryKind;
+use super::parser::{self, EntryKind};
 use super::status::{self, Inferred, TaskFacts};
 use crate::error::AppResult;
 
@@ -301,19 +301,41 @@ pub fn rebuild_session(conn: &mut Connection, session_id: &str) -> AppResult<()>
     Ok(())
 }
 
-/// Rebuilds everything once if the derivation rules changed since the
-/// archive was last derived. Returns whether a rebuild ran.
+/// Brings the archive up to the current parser and derivation rules.
+/// Entries are re-parsed from their stored raw JSON (not the original
+/// files, which may be gone), then every session is rebuilt. Returns whether
+/// anything ran.
 pub fn ensure_current(conn: &mut Connection) -> AppResult<bool> {
     use crate::db::queries::{get_setting, set_setting};
-    let stored = get_setting(conn, "derive_version")?
-        .and_then(|v| v.parse::<i64>().ok())
-        .unwrap_or(0);
-    if stored >= status::DERIVE_VERSION {
+    let version = |conn: &Connection, key: &str| -> AppResult<i64> {
+        Ok(get_setting(conn, key)?
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(0))
+    };
+    let reparse = version(conn, "parser_version")? < parser::PARSER_VERSION;
+    let rederive = reparse || version(conn, "derive_version")? < status::DERIVE_VERSION;
+    if !rederive {
         return Ok(false);
+    }
+    if reparse {
+        reparse_all(conn)?;
+        set_setting(conn, "parser_version", &parser::PARSER_VERSION.to_string())?;
     }
     rebuild_all(conn)?;
     set_setting(conn, "derive_version", &status::DERIVE_VERSION.to_string())?;
     Ok(true)
+}
+
+fn reparse_all(conn: &mut Connection) -> AppResult<()> {
+    let tx = conn.transaction()?;
+    for (id, raw) in crate::db::queries::all_raw_entries(&tx)? {
+        // A line that no longer parses keeps its old row rather than vanish.
+        if let parser::Parsed::Entry(e) = parser::parse_line(raw.as_bytes()) {
+            crate::db::queries::update_parsed_entry(&tx, id, &e)?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
 }
 
 /// Rebuilds every session, for recovery or after a derivation change.
@@ -400,12 +422,14 @@ fn load_rows(conn: &Connection, session_id: &str) -> AppResult<Vec<Row>> {
         .collect::<Result<_, _>>()?)
 }
 
-/// First non-empty line, shortened.
+/// First line with words in it, shortened. Attachment placeholders such as
+/// "[image]" only make the title if there is nothing else.
 fn title_from(text: &str) -> String {
-    let line = text
-        .lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty())
+    let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+    let line = lines
+        .clone()
+        .find(|l| !matches!(*l, "[image]" | "[document]"))
+        .or_else(|| lines.next())
         .unwrap_or("");
     if line.is_empty() {
         return "(untitled)".into();
@@ -619,6 +643,35 @@ mod tests {
     }
 
     #[test]
+    fn parser_change_reparses_stored_entries_without_the_files() {
+        let mut conn = ingested();
+        conn.execute(
+            "UPDATE entries SET summary = 'old summary' WHERE kind = 'prompt'",
+            [],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM settings WHERE key = 'parser_version'", [])
+            .unwrap();
+        assert!(ensure_current(&mut conn).unwrap());
+        let old: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM entries WHERE summary = 'old summary'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(old, 0);
+        let title: String = conn
+            .query_row(
+                "SELECT title FROM tasks WHERE session_id LIKE '%001' AND seq = 0",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(title, "Add a dark mode toggle to the settings page.");
+    }
+
+    #[test]
     fn ensure_current_rebuilds_once_per_rule_change() {
         let mut conn = ingested();
         conn.execute("UPDATE tasks SET status = 'stale-from-old-rules'", [])
@@ -639,6 +692,11 @@ mod tests {
     fn titles_take_the_first_line_and_are_shortened() {
         assert_eq!(title_from("\n  first line \nsecond"), "first line");
         assert_eq!(title_from("   "), "(untitled)");
+        assert_eq!(
+            title_from("[image]\n[image]\nWhat is this?"),
+            "What is this?"
+        );
+        assert_eq!(title_from("[image]"), "[image]");
         assert_eq!(
             title_from(&"x".repeat(200)).chars().count(),
             TITLE_MAX_CHARS + 1

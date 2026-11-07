@@ -38,7 +38,14 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::settings::app_info,
+            commands::settings::get_settings,
+            commands::settings::set_projects_root,
+            commands::settings::set_stale_minutes,
             commands::ingest::ingest_state,
+            commands::sessions::list_projects,
+            commands::tasks::list_tasks,
+            commands::tasks::get_task,
+            commands::tasks::get_entry_text,
         ])
         .run(tauri::generate_context!());
 

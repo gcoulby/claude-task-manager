@@ -13,7 +13,7 @@ use serde::Serialize;
 use super::parser::EntryKind;
 
 /// Bump when the rules below change, so stored statuses are recomputed.
-pub const DERIVE_VERSION: i64 = 1;
+pub const DERIVE_VERSION: i64 = 2;
 
 pub const DEFAULT_STALE_MINUTES: i64 = 15;
 

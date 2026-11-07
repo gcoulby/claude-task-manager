@@ -40,7 +40,13 @@ impl AppState {
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
-#[serde(rename_all = "camelCase", tag = "phase")]
+// rename_all only renames the variants; rename_all_fields is what turns
+// root_exists into rootExists for the UI.
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "phase"
+)]
 pub enum IngestState {
     #[default]
     Idle,
@@ -55,4 +61,22 @@ pub enum IngestState {
     Failed {
         message: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ingest_state_serialises_with_camel_case_fields() {
+        let ready = IngestState::Ready {
+            summary: ScanSummary::default(),
+            root: "/r".into(),
+            root_exists: true,
+        };
+        let json = serde_json::to_value(&ready).unwrap();
+        assert_eq!(json["phase"], "ready");
+        assert_eq!(json["rootExists"], true);
+        assert_eq!(json["summary"]["filesRead"], 0);
+    }
 }

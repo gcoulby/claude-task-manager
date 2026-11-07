@@ -8,6 +8,10 @@ use serde_json::{Map, Value};
 
 use super::redact::redact;
 
+/// Bump when classification or summaries change, so stored entries are
+/// re-parsed from their raw JSON.
+pub const PARSER_VERSION: i64 = 2;
+
 /// Longest summary kept for lists and search. The full text stays in raw_json.
 pub const SUMMARY_MAX_CHARS: usize = 4000;
 
@@ -146,6 +150,36 @@ pub fn parse_line(line: &[u8]) -> Parsed {
     }))
 }
 
+/// The complete, redacted text of a stored line, for an expanded view.
+/// Tool calls show their full input as formatted JSON.
+pub fn full_text(raw_json: &str) -> String {
+    let Ok(value) = serde_json::from_str::<Value>(raw_json) else {
+        return String::new();
+    };
+    let Some(obj) = value.as_object() else {
+        return String::new();
+    };
+    let Some(c) = classify(obj) else {
+        return String::new();
+    };
+    let text = if c.kind == EntryKind::ToolUse {
+        obj.get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(Value::as_array)
+            .and_then(|blocks| {
+                blocks
+                    .iter()
+                    .find(|b| b.get("type").and_then(Value::as_str) == Some("tool_use"))
+            })
+            .and_then(|b| b.get("input"))
+            .and_then(|input| serde_json::to_string_pretty(input).ok())
+            .unwrap_or(c.summary)
+    } else {
+        c.summary
+    };
+    redact(text.trim()).into_owned()
+}
+
 struct Classified {
     kind: EntryKind,
     tool_name: Option<String>,
@@ -216,7 +250,7 @@ fn classify_user(obj: &Map<String, Value>) -> Option<Classified> {
 
     let text = match content {
         Value::String(s) => s.clone(),
-        _ => content_text(&blocks),
+        _ => prompt_text(&blocks),
     };
     let trimmed = text.trim_start();
     let origin = obj
@@ -357,6 +391,39 @@ fn tool_result_text(block: &Value) -> String {
         Some(Value::String(s)) => s.clone(),
         Some(Value::Array(items)) => content_text(&items.iter().collect::<Vec<_>>()),
         _ => String::new(),
+    }
+}
+
+/// IDE extensions send context (the open file, the selection) as separate
+/// text blocks wrapped whole in one `<ide_…>` tag. They are not the user's
+/// words, so they are left out of the summary; the raw JSON keeps them.
+fn is_ide_context(block: &Value) -> bool {
+    let Some(text) = block.get("text").and_then(Value::as_str) else {
+        return false;
+    };
+    let text = text.trim();
+    let Some(rest) = text.strip_prefix("<ide_") else {
+        return false;
+    };
+    let Some(tag_end) = rest.find('>') else {
+        return false;
+    };
+    let tag = &rest[..tag_end];
+    tag.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && text.ends_with(&format!("</ide_{tag}>"))
+}
+
+fn prompt_text(blocks: &[&Value]) -> String {
+    let own: Vec<&Value> = blocks
+        .iter()
+        .copied()
+        .filter(|b| !is_ide_context(b))
+        .collect();
+    // A prompt that is nothing but context still needs a summary.
+    if own.is_empty() {
+        content_text(blocks)
+    } else {
+        content_text(&own)
     }
 }
 
@@ -686,6 +753,49 @@ mod tests {
         assert!(!e.raw_json.contains("line\\nline"));
         assert!(e.raw_json.contains("[2500 bytes omitted]"));
         assert!(e.raw_json.contains(r#""newString":"y""#));
+    }
+
+    #[test]
+    fn full_text_is_complete_and_redacted() {
+        let long = "y".repeat(SUMMARY_MAX_CHARS * 2);
+        let secret = format!("ghp_{}", "a1B2".repeat(10));
+        let line = user(json!(format!("{long} {secret}")), json!({})).to_string();
+        let text = full_text(&line);
+        assert!(text.starts_with(&long));
+        assert!(!text.contains(&secret));
+
+        let call = json!({"type":"assistant","message":{"id":"m","content":[
+            {"type":"tool_use","id":"t","name":"Edit","input":{"file_path":"/a.ts","old_string":"x"}}]}});
+        let text = full_text(&call.to_string());
+        assert!(text.contains("\"file_path\": \"/a.ts\""));
+        assert_eq!(full_text("not json"), "");
+    }
+
+    #[test]
+    fn ide_context_blocks_are_left_out_of_prompt_summaries() {
+        let e = entry(user(
+            json!([
+                {"type":"text","text":"<ide_opened_file>The user opened the file /a.ts in the IDE.</ide_opened_file>"},
+                {"type":"text","text":"Fix the failing test."}
+            ]),
+            json!({"origin":{"kind":"human"}}),
+        ));
+        assert_eq!(e.kind, EntryKind::Prompt);
+        assert_eq!(e.summary, "Fix the failing test.");
+        assert!(e.raw_json.contains("ide_opened_file"));
+
+        let only = entry(user(
+            json!([{"type":"text","text":"<ide_selection>x</ide_selection>"}]),
+            json!({}),
+        ));
+        assert_eq!(only.summary, "<ide_selection>x</ide_selection>");
+
+        // A prompt that merely starts with a tag-like word is the user's text.
+        let own = entry(user(
+            json!([{"type":"text","text":"<ide_x> is a tag I made"}]),
+            json!({}),
+        ));
+        assert_eq!(own.summary, "<ide_x> is a tag I made");
     }
 
     #[test]
