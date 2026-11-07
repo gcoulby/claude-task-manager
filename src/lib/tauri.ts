@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AppError, AppInfo } from "@/types/app";
+import type { IngestState } from "@/types/ingest";
 
 function isAppError(value: unknown): value is AppError {
   return (
@@ -23,4 +25,11 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
 
 export const api = {
   appInfo: () => call<AppInfo>("app_info"),
+  ingestState: () => call<IngestState>("ingest_state"),
+};
+
+/** Event names must match the constants in Rust. */
+export const events = {
+  onIngestState: (handler: (state: IngestState) => void): Promise<UnlistenFn> =>
+    listen<IngestState>("ingest://state", (e) => handler(e.payload)),
 };
