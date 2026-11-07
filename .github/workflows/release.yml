@@ -33,9 +33,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+        # A draft is not attached to its tag yet, so looking it up by tag
+        # finds nothing. Take the id from the create call instead.
         run: |
-          gh release create "$TAG" --draft --title "Claude Task Manager $TAG" --generate-notes
-          id=$(gh api "repos/${{ github.repository }}/releases" --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -n1)
+          id=$(gh api -X POST "repos/${{ github.repository }}/releases" \
+            -f tag_name="$TAG" -f name="Claude Task Manager $TAG" \
+            -F draft=true -F generate_release_notes=true --jq .id)
+          test -n "$id" || { echo "Could not create the draft release"; exit 1; }
           echo "release_id=$id" >> "$GITHUB_OUTPUT"
 
   build:
@@ -78,10 +82,24 @@ jobs:
 
   publish:
     name: Publish release
-    needs: build
+    needs: [draft, build]
     runs-on: ubuntu-latest
     steps:
+      - name: Check every platform uploaded its files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.draft.outputs.release_id }}
+        # Never publish a release the updater cannot use.
+        run: |
+          names=$(gh api "repos/${{ github.repository }}/releases/$RELEASE_ID/assets" --jq '.[].name')
+          echo "$names"
+          for pattern in '^latest\.json$' '\.app\.tar\.gz\.sig$' '\.dmg$' '\.(msi|exe)\.sig$'; do
+            echo "$names" | grep -Eq "$pattern" || { echo "Missing asset matching $pattern"; exit 1; }
+          done
       - name: Mark as the latest release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "${{ github.ref_name }}" --repo "${{ github.repository }}" --draft=false --latest
+          RELEASE_ID: ${{ needs.draft.outputs.release_id }}
+        run: |
+          gh api -X PATCH "repos/${{ github.repository }}/releases/$RELEASE_ID" \
+            -F draft=false -f make_latest=true --jq .html_url
