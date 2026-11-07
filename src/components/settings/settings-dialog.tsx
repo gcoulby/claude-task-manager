@@ -24,7 +24,7 @@ export function SettingsDialog() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>Stored on this computer only.</DialogDescription>
@@ -64,7 +64,7 @@ function SettingsForm({ settings }: { settings: Settings }) {
   const staleNumber = Number.parseInt(stale, 10);
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex min-w-0 flex-col gap-5">
       <section className="flex flex-col gap-2">
         <Label htmlFor="projects-root">Claude Code session folder</Label>
         <Input
@@ -192,9 +192,7 @@ function ArchiveSection() {
             {info.data.counts.sessionsArchivedOnly > 0 &&
               `. ${info.data.counts.sessionsArchivedOnly} kept only here.`}
           </p>
-          <p className="truncate font-mono text-xs text-muted-foreground" title={info.data.dbPath}>
-            {info.data.dbPath}
-          </p>
+          <p className="font-mono text-xs break-all text-muted-foreground">{info.data.dbPath}</p>
         </>
       )}
     </section>
