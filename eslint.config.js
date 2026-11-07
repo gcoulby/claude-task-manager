@@ -15,6 +15,10 @@ export default tseslint.config(
       ...reactHooks.configs.recommended.rules,
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
       "@typescript-eslint/no-explicit-any": "error",
+      // Warns that libraries such as TanStack Virtual cannot be memoised by
+      // the React Compiler. This app does not use the compiler, so the
+      // warning has nothing to act on.
+      "react-hooks/incompatible-library": "off",
     },
   },
   {
