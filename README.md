@@ -59,7 +59,7 @@ Local builds do not need the key. Release builds add `src-tauri/tauri.release.co
 
 The installers are not yet code signed by Apple or Microsoft, so expect:
 
-- **macOS:** Gatekeeper says the app cannot be opened. Right-click the app, choose **Open**, then confirm.
+- **macOS:** builds are ad-hoc signed but not notarised, so Gatekeeper says it cannot verify the developer. Right-click the app, choose **Open**, then confirm, or allow it under **System Settings > Privacy & Security**. Version 0.1.1 was not signed as a whole bundle, so macOS calls it "damaged" instead; to open that one, run `xattr -dr com.apple.quarantine "/Applications/Claude Task Manager.app"`.
 - **Windows:** SmartScreen shows "Windows protected your PC". Choose **More info**, then **Run anyway**.
 
 ## Licence
