@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
+use super::derive;
 use super::scanner::{self, ScanSummary};
 use super::watcher::{self, WatchEvent};
 use crate::db;
@@ -66,6 +67,8 @@ pub fn spawn(app: AppHandle, tx: Sender<IngestMsg>, rx: Receiver<IngestMsg>) {
 fn run(app: &AppHandle, tx: Sender<IngestMsg>, rx: Receiver<IngestMsg>) -> AppResult<()> {
     let state = app.state::<AppState>();
     let mut conn = db::open_existing(&state.db_path)?;
+    // Status rules may have changed since the archive was last derived.
+    derive::ensure_current(&mut conn)?;
 
     // Each pass of this loop is one "generation": a full scan of the current
     // root and a watcher on it, until a rescan is requested.

@@ -41,7 +41,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let started = Instant::now();
     derive::rebuild_session(&mut conn, &biggest)?;
-    println!("rebuild of largest session ({n} entries) {:.2?}", started.elapsed());
+    println!(
+        "rebuild of largest session ({n} entries) {:.2?}",
+        started.elapsed()
+    );
 
     let count = |sql: &str| -> rusqlite::Result<i64> { conn.query_row(sql, [], |r| r.get(0)) };
     println!("sessions {}", count("SELECT COUNT(*) FROM sessions")?);
@@ -81,6 +84,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (t, n) = row?;
         println!("  trigger {t:12} {n}");
     }
+    // Status check against real files. Reasons are rule templates; only API
+    // error reasons quote anything, and those are cut short.
+    let mut stmt = conn.prepare(
+        "SELECT status, CASE WHEN agent_id IS NULL THEN 'task' ELSE 'subagent' END,
+                substr(status_reason, 1, 45), COUNT(*)
+         FROM tasks GROUP BY 1, 2, 3 ORDER BY 4 DESC",
+    )?;
+    println!("task statuses (stored, before staleness):");
+    for row in stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, i64>(3)?,
+        ))
+    })? {
+        let (s, k, reason, n) = row?;
+        println!("  {n:4} {s:8} {k:9} {reason}");
+    }
+    let mut stmt = conn.prepare(
+        "SELECT status, substr(status_reason, 1, 45), COUNT(*) FROM sessions GROUP BY 1, 2 ORDER BY 3 DESC",
+    )?;
+    println!("session statuses:");
+    for row in stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, i64>(2)?,
+        ))
+    })? {
+        let (s, reason, n) = row?;
+        println!("  {n:4} {s:8} {reason}");
+    }
+
     println!(
         "database size {:.1} MB (before WAL checkpoint) at {}",
         std::fs::metadata(&db_path)?.len() as f64 / 1e6,

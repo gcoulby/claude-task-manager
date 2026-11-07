@@ -12,7 +12,14 @@ use crate::error::{AppError, AppResult};
 
 /// Numbered migrations, applied in order. Never edit or remove one that has
 /// shipped: add a new one instead.
-const MIGRATIONS: &[(i64, &str, &str)] = &[(1, "init", include_str!("migrations/0001_init.sql"))];
+const MIGRATIONS: &[(i64, &str, &str)] = &[
+    (1, "init", include_str!("migrations/0001_init.sql")),
+    (
+        2,
+        "task_activity",
+        include_str!("migrations/0002_task_activity.sql"),
+    ),
+];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS[MIGRATIONS.len() - 1].0;
 
@@ -213,6 +220,40 @@ mod tests {
             })
             .unwrap();
         assert_eq!(value, "v");
+    }
+
+    #[test]
+    fn upgrading_an_older_archive_backs_up_then_migrates() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(DB_FILE_NAME);
+        {
+            // Build a version 1 archive by hand, as an older release would have.
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL,
+                                                 applied_at TEXT NOT NULL);",
+            )
+            .unwrap();
+            conn.execute_batch(MIGRATIONS[0].2).unwrap();
+            conn.execute("INSERT INTO schema_migrations VALUES (1, 'init', 'x')", [])
+                .unwrap();
+            conn.execute("INSERT INTO settings VALUES ('kept', 'yes')", [])
+                .unwrap();
+        }
+
+        let conn = open(&path).unwrap();
+        assert_eq!(current_version(&conn).unwrap(), LATEST_VERSION);
+        let kept: String = conn
+            .query_row("SELECT value FROM settings WHERE key = 'kept'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(kept, "yes");
+
+        let backups: Vec<_> = fs::read_dir(backup_dir(&path)).unwrap().collect();
+        assert_eq!(backups.len(), 1);
+        let name = backups[0].as_ref().unwrap().file_name();
+        assert!(name.to_string_lossy().starts_with("archive-v1-"));
     }
 
     #[test]

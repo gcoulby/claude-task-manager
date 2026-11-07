@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use rusqlite::{Connection, params};
 
 use super::parser::EntryKind;
-use super::status::{self, TaskFacts};
+use super::status::{self, Inferred, TaskFacts};
 use crate::error::AppResult;
 
 const TITLE_MAX_CHARS: usize = 120;
@@ -49,6 +49,7 @@ struct TaskBuild {
     started_at: Option<String>,
     last_activity_at: Option<String>,
     entry_count: i64,
+    activity_ms: i64,
     facts: TaskFacts,
 }
 
@@ -66,6 +67,7 @@ impl TaskBuild {
             started_at: row.ts.clone(),
             last_activity_at: row.ts.clone(),
             entry_count: 0,
+            activity_ms: 0,
             facts: TaskFacts::default(),
         }
     }
@@ -87,6 +89,7 @@ impl TaskBuild {
             row.tool_use_id.as_deref(),
             row.tool_name.as_deref(),
             row.stop_reason.as_deref(),
+            &row.title_text,
         );
     }
 }
@@ -171,6 +174,7 @@ pub fn rebuild_session(conn: &mut Connection, session_id: &str) -> AppResult<()>
             .unwrap_or_else(|| first.title_text.clone());
         let mut task = TaskBuild::start(format!("agent:{agent_id}"), "subagent", &title, first);
         task.agent_id = Some(agent_id);
+        task.activity_ms = src.mtime_ms;
         task.parent_task_id = src
             .parent_tool_use_id
             .as_ref()
@@ -187,21 +191,41 @@ pub fn rebuild_session(conn: &mut Connection, session_id: &str) -> AppResult<()>
     // Only the newest top-level task can still be in progress; earlier ones
     // were ended by the prompt that followed them.
     let last_top_level = tasks.iter().rposition(|t| t.agent_id.is_none());
-    let source_mtime_ms = main.map(|m| m.mtime_ms).unwrap_or(0);
+    let main_mtime_ms = main.map(|m| m.mtime_ms).unwrap_or(0);
     for (i, task) in tasks.iter_mut().enumerate() {
-        let superseded = task.agent_id.is_none() && Some(i) != last_top_level;
-        task.facts.superseded = superseded;
+        if task.agent_id.is_none() {
+            task.facts.superseded = Some(i) != last_top_level;
+            task.activity_ms = main_mtime_ms;
+        }
+    }
+
+    let mut inferred: Vec<Inferred> = tasks.iter().map(|t| status::infer_task(&t.facts)).collect();
+    // Background subagents report their outcome to the main transcript.
+    let reported: HashMap<String, String> = rows
+        .iter()
+        .filter(|r| r.kind == Some(EntryKind::Notification))
+        .filter_map(|r| status::parse_notification(&r.title_text))
+        .collect();
+    for (task, state) in tasks.iter().zip(inferred.iter_mut()) {
+        let Some(agent_id) = &task.agent_id else {
+            continue;
+        };
+        if let Some(better) =
+            status::from_notification(state, reported.get(agent_id).map(String::as_str))
+        {
+            *state = better;
+        }
     }
 
     tx.execute("DELETE FROM tasks WHERE session_id = ?1", [session_id])?;
     {
         let mut insert = tx.prepare(
             "INSERT INTO tasks (id, session_id, agent_id, parent_task_id, title, trigger, status,
-                 status_reason, started_at, ended_at, last_activity_at, entry_count, seq)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                 status_reason, started_at, ended_at, last_activity_at, entry_count, seq,
+                 activity_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         )?;
-        for (seq, t) in tasks.iter().enumerate() {
-            let s = status::infer_task(&t.facts);
+        for (seq, (t, s)) in tasks.iter().zip(&inferred).enumerate() {
             let ended_at = if s.is_finished() {
                 t.last_activity_at.clone()
             } else {
@@ -221,6 +245,7 @@ pub fn rebuild_session(conn: &mut Connection, session_id: &str) -> AppResult<()>
                 t.last_activity_at,
                 t.entry_count,
                 seq as i64,
+                t.activity_ms,
             ])?;
         }
     }
@@ -237,8 +262,15 @@ pub fn rebuild_session(conn: &mut Connection, session_id: &str) -> AppResult<()>
         .or(sources.first())
         .map(|s| s.project_dir.clone())
         .unwrap_or_default();
-    let session_status =
-        status::infer_session(last_top_level.and_then(|i| tasks.get(i)).map(|t| &t.facts));
+    let subagents: Vec<(&str, &Inferred)> = tasks
+        .iter()
+        .zip(&inferred)
+        .filter(|(t, _)| t.agent_id.is_some())
+        .map(|(t, s)| (t.title.as_str(), s))
+        .collect();
+    let session_status = status::infer_session(last_top_level.map(|i| &inferred[i]), &subagents);
+    // Any write to any of the session's files counts as activity.
+    let source_mtime_ms = sources.iter().map(|s| s.mtime_ms).max().unwrap_or(0);
     let top_level_tasks = tasks.iter().filter(|t| t.agent_id.is_none()).count() as i64;
     tx.execute(
         "INSERT INTO sessions (id, project_cwd, project_dir, title, started_at, last_activity_at,
@@ -267,6 +299,21 @@ pub fn rebuild_session(conn: &mut Connection, session_id: &str) -> AppResult<()>
     )?;
     tx.commit()?;
     Ok(())
+}
+
+/// Rebuilds everything once if the derivation rules changed since the
+/// archive was last derived. Returns whether a rebuild ran.
+pub fn ensure_current(conn: &mut Connection) -> AppResult<bool> {
+    use crate::db::queries::{get_setting, set_setting};
+    let stored = get_setting(conn, "derive_version")?
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(0);
+    if stored >= status::DERIVE_VERSION {
+        return Ok(false);
+    }
+    rebuild_all(conn)?;
+    set_setting(conn, "derive_version", &status::DERIVE_VERSION.to_string())?;
+    Ok(true)
 }
 
 /// Rebuilds every session, for recovery or after a derivation change.
@@ -330,7 +377,7 @@ fn load_rows(conn: &Connection, session_id: &str) -> AppResult<Vec<Row>> {
     Ok(conn
         .prepare(
             "SELECT source_id, byte_offset, uuid, kind, tool_name, tool_use_id, stop_reason, cwd,
-                    CASE WHEN kind IN ('prompt', 'command', 'ai_title', 'custom_title')
+                    CASE WHEN kind IN ('prompt', 'command', 'ai_title', 'custom_title', 'api_error', 'notification')
                          THEN substr(summary, 1, 400) ELSE '' END,
                     ts
              FROM entries WHERE session_id = ?1 ORDER BY source_id, byte_offset",
@@ -497,6 +544,95 @@ mod tests {
             .unwrap();
         assert_eq!(rebuild_all(&mut conn).unwrap(), 4);
         assert_eq!(ids(&conn), before);
+    }
+
+    fn statuses(conn: &Connection, session: &str) -> Vec<(String, String)> {
+        conn.prepare(
+            "SELECT status, status_reason FROM tasks WHERE session_id LIKE ?1 ORDER BY seq",
+        )
+        .unwrap()
+        .query_map([format!("%{session}")], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+    }
+
+    fn session_status(conn: &Connection, session: &str) -> (String, String) {
+        conn.query_row(
+            "SELECT status, status_reason FROM sessions WHERE id LIKE ?1",
+            [format!("%{session}")],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn statuses_match_each_fixture_scenario() {
+        let conn = ingested();
+        let s1 = statuses(&conn, "001");
+        let reasons: Vec<&str> = s1.iter().map(|(_, r)| r.as_str()).collect();
+        assert!(s1.iter().all(|(s, _)| s == "done"), "{s1:?}");
+        assert_eq!(
+            reasons,
+            vec![
+                "Finished its turn.",
+                "Stopped by you.",
+                "Ended when the next prompt started.",
+                "Finished its turn.",
+                "Finished its turn.",
+                "Finished its turn.",
+            ]
+        );
+        assert_eq!(session_status(&conn, "001").0, "done");
+
+        let (status, reason) = session_status(&conn, "002");
+        assert_eq!(status, "waiting");
+        assert!(reason.contains("question"));
+
+        let (status, reason) = session_status(&conn, "003");
+        assert_eq!(status, "running");
+        assert!(reason.contains("cannot show whether"), "{reason}");
+
+        let (status, reason) = session_status(&conn, "004");
+        assert_eq!(status, "failed");
+        assert!(reason.contains("529"), "{reason}");
+    }
+
+    #[test]
+    fn finished_tasks_have_an_end_time_and_open_ones_do_not() {
+        let conn = ingested();
+        let open: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE status IN ('running', 'waiting') AND ended_at IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let finished_without_end: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE status IN ('done', 'failed') AND ended_at IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!((open, finished_without_end), (0, 0));
+    }
+
+    #[test]
+    fn ensure_current_rebuilds_once_per_rule_change() {
+        let mut conn = ingested();
+        conn.execute("UPDATE tasks SET status = 'stale-from-old-rules'", [])
+            .unwrap();
+        assert!(ensure_current(&mut conn).unwrap());
+        let leftovers: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE status = 'stale-from-old-rules'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(leftovers, 0);
+        assert!(!ensure_current(&mut conn).unwrap());
     }
 
     #[test]

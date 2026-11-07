@@ -133,6 +133,8 @@ It is sometimes a plain string (69 cases). Persisted outputs in `tool-results/` 
 - `agent-<agent-id>.meta.json`: `{ agentType, description, spawnDepth, toolUseId, stoppedByUser? }`. **`toolUseId` is the `tool_use` id of the parent's `Agent` call**, which makes each subagent run a child task of whichever task holds that call.
 - The parent's `Agent` tool result also has `agentId`; all 32 sampled links resolved to an existing file.
 - Main session files contain no sidechain entries.
+- All 32 sampled runs were background agents (`isAsync: true`, status `async_launched`), so the parent's turn usually ends before the subagent does. A finished parent says nothing about the subagent.
+- Background agents report back through a `user` entry in the main transcript with `origin.kind: "task-notification"`, whose text contains `<task-id><agent-id></task-id>` and `<status>completed|failed</status>`. 14 of the 32 had one. That report is the best evidence of how a background agent ended, especially when its own transcript stops without an `end_turn`, which happened 3 times.
 
 ## Task boundaries
 
@@ -149,6 +151,8 @@ A task is one prompt through to the end of that turn:
 - **Waiting:** a pending `AskUserQuestion` call is definitely waiting for the user. Any other `tool_use` without a result could be a long tool run or a permission prompt, and the transcript cannot tell these apart. Say so instead of guessing.
 - **Failed:** `system` `api_error` with no later success, or an `isApiErrorMessage` assistant entry ending the turn.
 - **Stale:** no new bytes for N minutes and not done.
+- **Subagents:** a background agent's own transcript decides its status; if that looks unfinished, its `<task-notification>` report wins.
+- Checked against the sample: 16 subagents inferred "stopped by you" matches the 16 `meta.json` files with `stoppedByUser`.
 
 ## Retention
 
