@@ -22,6 +22,10 @@ pub fn run() {
                 app.handle().plugin(tauri_plugin_process::init())?;
             }
             let data_dir = app.path().app_data_dir()?;
+            // Debug builds keep their own archive so development can never
+            // migrate the installed app's archive past what it understands.
+            #[cfg(debug_assertions)]
+            let data_dir = data_dir.join("dev");
             let db_path = data_dir.join(db::DB_FILE_NAME);
             // A failed open (for example an archive from a newer version) must
             // not stop the window appearing: the UI explains the problem.

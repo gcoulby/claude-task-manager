@@ -38,7 +38,11 @@ export function SettingsDialog() {
         </DialogHeader>
         {settings.isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
         {settings.error && (
-          <p className="text-sm text-destructive">{errorMessage(settings.error)}</p>
+          <>
+            <p className="text-sm text-destructive">{errorMessage(settings.error)}</p>
+            {/* Updating is how a too-new archive gets fixed, so keep it reachable. */}
+            <UpdateCheckOnly />
+          </>
         )}
         {settings.data && (
           // Keyed so the form resets to stored values each time it opens.
@@ -360,5 +364,46 @@ function UsageSection({ settings }: { settings: Settings }) {
       </div>
       {save.error && <p className="text-xs text-destructive">{errorMessage(save.error)}</p>}
     </section>
+  );
+}
+
+function UpdateCheckOnly() {
+  const info = useAppInfo();
+  const setAvailable = useUpdates((s) => s.setAvailable);
+  const setOpen = useUi((s) => s.setSettingsOpen);
+  const [result, setResult] = useState<CheckResult>({ kind: "idle" });
+  const runCheck = async () => {
+    setResult({ kind: "checking" });
+    try {
+      const update = await checkForUpdate();
+      if (!update) return setResult({ kind: "latest" });
+      setResult({ kind: "found", version: update.version });
+      setOpen(false);
+      setAvailable(update);
+    } catch (err) {
+      setResult({ kind: "error", message: errorMessage(err) });
+    }
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-sm">
+        Claude Task Manager {info.data ? `version ${info.data.version}` : ""}
+      </p>
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={result.kind === "checking"}
+          onClick={() => void runCheck()}
+        >
+          Check for updates
+        </Button>
+        <span className="text-xs text-muted-foreground">
+          {result.kind === "checking" && "Checking…"}
+          {result.kind === "latest" && "You have the latest version."}
+          {result.kind === "error" && `Could not check: ${result.message}`}
+        </span>
+      </div>
+    </div>
   );
 }

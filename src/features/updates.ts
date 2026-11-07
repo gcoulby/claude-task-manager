@@ -28,8 +28,14 @@ export function useStartupUpdateCheck() {
     let cancelled = false;
     const run = async () => {
       try {
-        const settings = await api.getSettings();
-        if (!settings.updateCheckOnStartup) return;
+        // If the archive cannot be opened (for example it is from a newer
+        // version), settings are unavailable. Check anyway: an update may be
+        // exactly what fixes it.
+        const enabled = await api
+          .getSettings()
+          .then((settings) => settings.updateCheckOnStartup)
+          .catch(() => true);
+        if (!enabled) return;
         const update = await checkForUpdate();
         if (!cancelled && update) useUpdates.getState().setAvailable(update);
       } catch {

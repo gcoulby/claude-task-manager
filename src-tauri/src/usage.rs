@@ -257,9 +257,9 @@ pub fn spawn(app: AppHandle, rx: Receiver<UsageMsg>) {
     let spawned = std::thread::Builder::new()
         .name("plan-usage".into())
         .spawn(move || {
-            let workdir = match app.path().app_data_dir() {
-                Ok(d) => d.join("usage-probe"),
-                Err(_) => return,
+            let workdir = match app.state::<AppState>().db_path.parent() {
+                Some(d) => d.join("usage-probe"),
+                None => return,
             };
             loop {
                 let state = app.state::<AppState>();
