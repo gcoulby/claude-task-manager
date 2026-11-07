@@ -43,6 +43,7 @@ pub fn run() {
             commands::settings::set_stale_minutes,
             commands::ingest::ingest_state,
             commands::sessions::list_projects,
+            commands::sessions::archive_info,
             commands::tasks::list_tasks,
             commands::tasks::get_task,
             commands::tasks::get_entry_text,

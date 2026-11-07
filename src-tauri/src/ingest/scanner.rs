@@ -38,6 +38,30 @@ pub fn default_projects_root() -> AppResult<PathBuf> {
     Ok(home.join(".claude").join("projects"))
 }
 
+/// Claude Code's documented default for `cleanupPeriodDays`.
+pub const DEFAULT_RETENTION_DAYS: i64 = 30;
+
+/// How many days Claude Code keeps transcripts, and whether that is the
+/// default. Reads only this one key from `~/.claude/settings.json`, and
+/// never writes to it.
+pub fn claude_retention_days() -> (i64, bool) {
+    let Some(home) = dirs::home_dir() else {
+        return (DEFAULT_RETENTION_DAYS, true);
+    };
+    retention_from_settings(&home.join(".claude").join("settings.json"))
+}
+
+fn retention_from_settings(path: &Path) -> (i64, bool) {
+    let configured = fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|v| v.get("cleanupPeriodDays").and_then(Value::as_i64));
+    match configured {
+        Some(days) => (days, false),
+        None => (DEFAULT_RETENTION_DAYS, true),
+    }
+}
+
 /// Lists main transcripts (`<project>/<session>.jsonl`) and subagent runs
 /// (`<project>/<session>/subagents/agent-<id>.jsonl`). A missing root is not
 /// an error: Claude Code may simply not have run yet.
@@ -168,8 +192,7 @@ pub fn ingest_file(conn: &mut Connection, src: &SourceFile) -> AppResult<FileOut
         return Ok(FileOutcome::default());
     }
     if size < row.byte_offset {
-        queries::reset_source(&tx, row.id)?;
-        row.byte_offset = 0;
+        row = queries::retire_source(&tx, row.id, mtime_ms.max(1))?;
     }
     if let Some(meta_path) = src.meta_path() {
         queries::set_agent_meta(&tx, row.id, &read_agent_meta(&meta_path))?;
@@ -513,10 +536,12 @@ mod tests {
     }
 
     #[test]
-    fn shrunk_file_is_reread_from_the_start() {
+    fn rewritten_file_is_reread_and_old_rows_are_kept() {
         let dir = fixture_copy();
         let mut conn = db::open_in_memory();
         scan(&mut conn, dir.path(), |_| {}).unwrap();
+        let session = "SELECT COUNT(*) FROM entries WHERE session_id LIKE '%002'";
+        let before = count(&conn, session);
         let path = dir
             .path()
             .join("-Users-alex-code-demo-app/00000000-0000-4000-8000-000000000002.jsonl");
@@ -529,13 +554,26 @@ mod tests {
         fs::write(&path, format!("{first_line}\n")).unwrap();
 
         scan(&mut conn, dir.path(), |_| {}).unwrap();
+        // Nothing deleted: the old rows remain, plus one from the new file.
+        assert_eq!(count(&conn, session), before + 1);
         assert_eq!(
             count(
                 &conn,
-                "SELECT COUNT(*) FROM entries WHERE session_id LIKE '%002'"
+                "SELECT COUNT(*) FROM sources WHERE replaced_at_ms IS NOT NULL"
             ),
             1
         );
+        // The session shows only the current file's content.
+        assert_eq!(
+            count(
+                &conn,
+                "SELECT SUM(entry_count) FROM tasks WHERE session_id LIKE '%002'"
+            ),
+            1
+        );
+        // A later scan does not flag the retired row as newly missing.
+        let again = scan(&mut conn, dir.path(), |_| {}).unwrap();
+        assert_eq!(again.sessions_rebuilt, 0);
     }
 
     #[test]
@@ -641,6 +679,17 @@ mod tests {
             ),
             1
         );
+    }
+
+    #[test]
+    fn reads_retention_setting_or_falls_back_to_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        assert_eq!(retention_from_settings(&path), (30, true));
+        fs::write(&path, r#"{"cleanupPeriodDays": 90, "model": "x"}"#).unwrap();
+        assert_eq!(retention_from_settings(&path), (90, false));
+        fs::write(&path, "not json").unwrap();
+        assert_eq!(retention_from_settings(&path), (30, true));
     }
 
     #[test]

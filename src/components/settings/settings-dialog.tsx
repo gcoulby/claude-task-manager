@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { keys, queryClient, useSettings } from "@/features/queries";
+import { keys, queryClient, useArchiveInfo, useSettings } from "@/features/queries";
 import { api, errorMessage } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { useUi, type Theme } from "@/store/ui";
@@ -138,6 +138,8 @@ function SettingsForm({ settings }: { settings: Settings }) {
         )}
       </section>
 
+      <ArchiveSection />
+
       <section className="flex flex-col gap-2">
         <Label>Theme</Label>
         <div className="flex gap-1" role="radiogroup" aria-label="Theme">
@@ -159,5 +161,39 @@ function SettingsForm({ settings }: { settings: Settings }) {
         </div>
       </section>
     </div>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1_000_000) return `${Math.round(bytes / 1000)} kB`;
+  if (bytes < 1_000_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
+  return `${(bytes / 1_000_000_000).toFixed(2)} GB`;
+}
+
+function ArchiveSection() {
+  const info = useArchiveInfo();
+  return (
+    <section className="flex flex-col gap-1.5">
+      <Label>Archive</Label>
+      {info.error && <p className="text-xs text-destructive">{errorMessage(info.error)}</p>}
+      {info.data && (
+        <>
+          <p className="text-xs text-muted-foreground">
+            Claude Code deletes transcripts after {info.data.retentionDays} days
+            {info.data.retentionIsDefault ? " (its default)" : " (set in your Claude settings)"}.
+            This app keeps its own copy, so history survives that clean-up.
+          </p>
+          <p className="text-xs">
+            {info.data.counts.sessions} sessions, {info.data.counts.tasks} tasks,{" "}
+            {info.data.counts.entries} entries, {formatBytes(info.data.dbBytes)}
+            {info.data.counts.sessionsArchivedOnly > 0 &&
+              `. ${info.data.counts.sessionsArchivedOnly} kept only here.`}
+          </p>
+          <p className="truncate font-mono text-xs text-muted-foreground" title={info.data.dbPath}>
+            {info.data.dbPath}
+          </p>
+        </>
+      )}
+    </section>
   );
 }

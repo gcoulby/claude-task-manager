@@ -4,7 +4,9 @@ use serde::Serialize;
 use tauri::State;
 
 use super::tasks::Project;
+use crate::db::queries::{self, ArchiveCounts};
 use crate::error::AppResult;
+use crate::ingest::scanner;
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize)]
@@ -47,5 +49,33 @@ pub fn list_projects(state: State<'_, AppState>) -> AppResult<Vec<ProjectSummary
         let mut out: Vec<ProjectSummary> = by_key.into_values().collect();
         out.sort_by(|a, b| b.last_activity_at.cmp(&a.last_activity_at));
         Ok(out)
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchiveInfo {
+    pub counts: ArchiveCounts,
+    pub db_path: String,
+    pub db_bytes: u64,
+    /// How long Claude Code keeps its own transcripts.
+    pub retention_days: i64,
+    pub retention_is_default: bool,
+}
+
+#[tauri::command]
+pub fn archive_info(state: State<'_, AppState>) -> AppResult<ArchiveInfo> {
+    let counts = state.with_db(queries::archive_counts)?;
+    let (retention_days, retention_is_default) = scanner::claude_retention_days();
+    // The write-ahead log holds recent writes, so count it towards the size.
+    let size = |p: &std::path::Path| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+    let mut wal = state.db_path.clone().into_os_string();
+    wal.push("-wal");
+    Ok(ArchiveInfo {
+        counts,
+        db_path: state.db_path.to_string_lossy().into_owned(),
+        db_bytes: size(&state.db_path) + size(std::path::Path::new(&wal)),
+        retention_days,
+        retention_is_default,
     })
 }

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { BotIcon, TerminalIcon, BellIcon } from "lucide-react";
+import { ArchiveIcon, BellIcon, BotIcon, TerminalIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusDot } from "@/components/tasks/status-badge";
 import { formatWhen, isActive, taskDuration } from "@/lib/format";
@@ -123,6 +123,12 @@ function TaskListRow({
         <StatusDot status={task.status} />
         <TriggerIcon trigger={task.trigger} />
         <span className="truncate text-sm">{task.title}</span>
+        {task.sourceMissing && (
+          <ArchiveIcon
+            className="ml-auto size-3 shrink-0 text-amber-600 dark:text-amber-400"
+            aria-label="Original transcript deleted; archived copy only"
+          />
+        )}
       </span>
       <span className="flex min-w-0 items-center gap-1.5 pl-4 text-xs text-muted-foreground">
         <span className="truncate" title={task.project.key}>

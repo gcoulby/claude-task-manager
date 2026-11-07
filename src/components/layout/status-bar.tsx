@@ -1,3 +1,4 @@
+import { useArchiveInfo } from "@/features/queries";
 import { useIngestState } from "@/features/use-ingest-state";
 import type { IngestState } from "@/types/ingest";
 
@@ -31,15 +32,21 @@ function describe(state: IngestState | null): { text: string; tone: "muted" | "e
 
 export function StatusBar() {
   const { text, tone } = describe(useIngestState());
+  const archive = useArchiveInfo();
+  const archivedOnly = archive.data?.counts.sessionsArchivedOnly ?? 0;
   return (
-    <footer
-      className={
-        "border-t px-3 py-1 text-xs " +
-        (tone === "error" ? "text-destructive" : "text-muted-foreground")
-      }
-      role="status"
-    >
-      {text}
+    <footer className="flex items-center gap-3 border-t px-3 py-1 text-xs" role="status">
+      <span className={tone === "error" ? "text-destructive" : "text-muted-foreground"}>
+        {text}
+      </span>
+      {archivedOnly > 0 && (
+        <span
+          className="ml-auto text-muted-foreground"
+          title="Claude Code has deleted these transcripts. This app's archive is the only copy."
+        >
+          {archivedOnly} {archivedOnly === 1 ? "session" : "sessions"} kept only here
+        </span>
+      )}
     </footer>
   );
 }

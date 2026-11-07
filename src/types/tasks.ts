@@ -91,3 +91,20 @@ export interface Settings {
   defaultProjectsRoot: string | null;
   staleMinutes: number;
 }
+
+/** Mirrors `db::queries::ArchiveCounts`. */
+export interface ArchiveCounts {
+  sessions: number;
+  sessionsArchivedOnly: number;
+  tasks: number;
+  entries: number;
+}
+
+/** Mirrors `commands::sessions::ArchiveInfo`. */
+export interface ArchiveInfo {
+  counts: ArchiveCounts;
+  dbPath: string;
+  dbBytes: number;
+  retentionDays: number;
+  retentionIsDefault: boolean;
+}

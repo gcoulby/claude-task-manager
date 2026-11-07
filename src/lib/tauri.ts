@@ -2,7 +2,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AppError, AppInfo } from "@/types/app";
 import type { ArchiveChanged, IngestState } from "@/types/ingest";
-import type { ProjectSummary, Settings, TaskDetail, TaskFilter, TaskRow } from "@/types/tasks";
+import type {
+  ArchiveInfo,
+  ProjectSummary,
+  Settings,
+  TaskDetail,
+  TaskFilter,
+  TaskRow,
+} from "@/types/tasks";
 
 function isAppError(value: unknown): value is AppError {
   return (
@@ -31,6 +38,7 @@ export const api = {
   getTask: (taskId: string) => call<TaskDetail>("get_task", { taskId }),
   getEntryText: (entryId: number) => call<string>("get_entry_text", { entryId }),
   listProjects: () => call<ProjectSummary[]>("list_projects"),
+  archiveInfo: () => call<ArchiveInfo>("archive_info"),
   getSettings: () => call<Settings>("get_settings"),
   setProjectsRoot: (path: string | null) => call<null>("set_projects_root", { path }),
   setStaleMinutes: (minutes: number) => call<null>("set_stale_minutes", { minutes }),

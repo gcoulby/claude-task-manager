@@ -86,15 +86,37 @@ pub fn set_source_progress(
     Ok(())
 }
 
-/// The file shrank, so it was replaced rather than appended to. Drop what we
-/// read from it and start again. This is the one case where entries are deleted.
-pub fn reset_source(conn: &Connection, source_id: i64) -> AppResult<()> {
-    conn.execute("DELETE FROM entries WHERE source_id = ?1", [source_id])?;
+/// The file shrank, so it was rewritten rather than appended to. The old
+/// source row and its entries are retired under a new path, never deleted,
+/// and a fresh source row takes over the real path.
+pub fn retire_source(conn: &Connection, source_id: i64, now_ms: i64) -> AppResult<SourceRow> {
     conn.execute(
-        "UPDATE sources SET byte_offset = 0, size = 0, mtime_ms = 0 WHERE id = ?1",
+        "INSERT INTO sources (path, session_id, agent_id, project_dir, parent_tool_use_id,
+                              agent_type, agent_description)
+         SELECT path || '.pending', session_id, agent_id, project_dir, parent_tool_use_id,
+                agent_type, agent_description
+         FROM sources WHERE id = ?1",
         [source_id],
     )?;
-    Ok(())
+    let new_id = conn.last_insert_rowid();
+    conn.execute(
+        "UPDATE sources SET path = path || '#replaced-' || ?2, replaced_at_ms = ?2,
+                            source_missing = 1
+         WHERE id = ?1",
+        params![source_id, now_ms],
+    )?;
+    // Only now is the real path free for the new row.
+    conn.execute(
+        "UPDATE sources SET path = substr(path, 1, length(path) - length('.pending'))
+         WHERE id = ?1",
+        [new_id],
+    )?;
+    Ok(SourceRow {
+        id: new_id,
+        byte_offset: 0,
+        size: 0,
+        mtime_ms: 0,
+    })
 }
 
 /// Returns false if the line was already stored.
@@ -140,7 +162,10 @@ where
     F: Fn(&str) -> bool,
 {
     let rows: Vec<(i64, String, String, bool)> = conn
-        .prepare("SELECT id, path, session_id, source_missing FROM sources")?
+        .prepare(
+            "SELECT id, path, session_id, source_missing FROM sources
+             WHERE replaced_at_ms IS NULL",
+        )?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
         .collect::<Result<_, _>>()?;
     let mut changed = Vec::new();
@@ -318,7 +343,8 @@ pub fn entry_raw_json(conn: &Connection, entry_id: i64) -> AppResult<Option<Stri
 pub fn main_source_path(conn: &Connection, session_id: &str) -> AppResult<Option<String>> {
     Ok(conn
         .query_row(
-            "SELECT path FROM sources WHERE session_id = ?1 AND agent_id IS NULL",
+            "SELECT path FROM sources
+             WHERE session_id = ?1 AND agent_id IS NULL AND replaced_at_ms IS NULL",
             [session_id],
             |r| r.get(0),
         )
@@ -352,4 +378,32 @@ pub fn update_parsed_entry(conn: &Connection, id: i64, e: &ParsedEntry) -> AppRe
         e.raw_json,
     ])?;
     Ok(())
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchiveCounts {
+    pub sessions: i64,
+    /// Sessions whose transcript Claude Code has deleted.
+    pub sessions_archived_only: i64,
+    pub tasks: i64,
+    pub entries: i64,
+}
+
+pub fn archive_counts(conn: &Connection) -> AppResult<ArchiveCounts> {
+    Ok(conn.query_row(
+        "SELECT (SELECT COUNT(*) FROM sessions),
+                (SELECT COUNT(*) FROM sessions WHERE source_missing = 1),
+                (SELECT COUNT(*) FROM tasks),
+                (SELECT COUNT(*) FROM entries)",
+        [],
+        |r| {
+            Ok(ArchiveCounts {
+                sessions: r.get(0)?,
+                sessions_archived_only: r.get(1)?,
+                tasks: r.get(2)?,
+                entries: r.get(3)?,
+            })
+        },
+    )?)
 }

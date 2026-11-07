@@ -98,7 +98,12 @@ impl TaskBuild {
 pub fn rebuild_session(conn: &mut Connection, session_id: &str) -> AppResult<()> {
     let tx = conn.transaction()?;
     let sources = load_sources(&tx, session_id)?;
-    let rows = load_rows(&tx, session_id)?;
+    // Rows from retired (rewritten) sources stay archived but are not shown.
+    let current: std::collections::HashSet<i64> = sources.iter().map(|s| s.id).collect();
+    let rows: Vec<Row> = load_rows(&tx, session_id)?
+        .into_iter()
+        .filter(|r| current.contains(&r.source_id))
+        .collect();
 
     let main = sources.iter().find(|s| s.agent_id.is_none());
     let mut tasks: Vec<TaskBuild> = Vec::new();
@@ -379,7 +384,8 @@ fn load_sources(conn: &Connection, session_id: &str) -> AppResult<Vec<Source>> {
         .prepare(
             "SELECT id, agent_id, project_dir, mtime_ms, source_missing, parent_tool_use_id,
                     agent_description
-             FROM sources WHERE session_id = ?1 ORDER BY agent_id IS NOT NULL, id",
+             FROM sources WHERE session_id = ?1 AND replaced_at_ms IS NULL
+             ORDER BY agent_id IS NOT NULL, id",
         )?
         .query_map([session_id], |r| {
             Ok(Source {

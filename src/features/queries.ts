@@ -20,6 +20,7 @@ export const keys = {
   allTaskDetails: ["task"] as const,
   entryText: (id: number) => ["entry-text", id] as const,
   projects: ["projects"] as const,
+  archiveInfo: ["archive-info"] as const,
   settings: ["settings"] as const,
 };
 
@@ -58,4 +59,8 @@ export function useProjects() {
 
 export function useSettings() {
   return useQuery({ queryKey: keys.settings, queryFn: api.getSettings });
+}
+
+export function useArchiveInfo() {
+  return useQuery({ queryKey: keys.archiveInfo, queryFn: api.archiveInfo });
 }

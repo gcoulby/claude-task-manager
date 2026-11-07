@@ -19,6 +19,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "task_activity",
         include_str!("migrations/0002_task_activity.sql"),
     ),
+    (
+        3,
+        "replaced_sources",
+        include_str!("migrations/0003_replaced_sources.sql"),
+    ),
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS[MIGRATIONS.len() - 1].0;
