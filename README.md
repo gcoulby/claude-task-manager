@@ -53,6 +53,8 @@ gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 
 The public half (`.key.pub`) goes in `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`. Keep a backup of the private key and its password outside this repository: if they are lost, installed copies cannot update and need a manual reinstall. The first version that contains the updater has to be installed by hand.
 
+In-app updates work on macOS without notarisation (tested from 0.1.1 to 0.1.2): the app downloads the update itself, so macOS does not quarantine it. Only the first, hand-installed copy meets Gatekeeper.
+
 Local builds do not need the key. Release builds add `src-tauri/tauri.release.conf.json`, which turns on updater artifacts.
 
 ## Unsigned builds
