@@ -6,6 +6,17 @@ use serde::Serialize;
 pub enum AppError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("Database error: {0}")]
+    Db(#[from] rusqlite::Error),
+    #[error(
+        "The archive was written by a newer version of this app (schema {found}, this version \
+         supports up to {supported}). Update the app to open it. Nothing has been changed."
+    )]
+    DatabaseTooNew { found: i64, supported: i64 },
+    #[error("Could not find your home folder, so the Claude Code session folder is unknown.")]
+    NoHomeDir,
+    #[error("{0}")]
+    Other(String),
 }
 
 #[derive(Serialize)]
@@ -19,6 +30,10 @@ impl Serialize for AppError {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let kind = match self {
             AppError::Io(_) => "io",
+            AppError::Db(_) => "db",
+            AppError::DatabaseTooNew { .. } => "databaseTooNew",
+            AppError::NoHomeDir => "noHomeDir",
+            AppError::Other(_) => "other",
         };
         SerialisedError {
             kind,
