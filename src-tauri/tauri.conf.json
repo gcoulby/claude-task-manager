@@ -33,5 +33,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_CONTENTS_OF_claude-task-manager.key.pub",
+      "endpoints": [
+        "https://github.com/gcoulby/claude-task-manager/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

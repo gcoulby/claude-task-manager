@@ -10,7 +10,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { keys, queryClient, useArchiveInfo, useSettings } from "@/features/queries";
+import { keys, queryClient, useAppInfo, useArchiveInfo, useSettings } from "@/features/queries";
+import { checkForUpdate, useUpdates } from "@/features/updates";
 import { api, errorMessage } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { useUi, type Theme } from "@/store/ui";
@@ -140,6 +141,8 @@ function SettingsForm({ settings }: { settings: Settings }) {
 
       <ArchiveSection />
 
+      <AboutSection settings={settings} />
+
       <section className="flex flex-col gap-2">
         <Label>Theme</Label>
         <div className="flex gap-1" role="radiogroup" aria-label="Theme">
@@ -193,6 +196,82 @@ function ArchiveSection() {
             {info.data.dbPath}
           </p>
         </>
+      )}
+    </section>
+  );
+}
+
+type CheckResult =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "latest" }
+  | { kind: "found"; version: string }
+  | { kind: "error"; message: string };
+
+function AboutSection({ settings }: { settings: Settings }) {
+  const info = useAppInfo();
+  const setAvailable = useUpdates((s) => s.setAvailable);
+  const setOpen = useUi((s) => s.setSettingsOpen);
+  const [result, setResult] = useState<CheckResult>({ kind: "idle" });
+  const toggle = useMutation({
+    mutationFn: (enabled: boolean) => api.setUpdateCheckOnStartup(enabled),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.settings }),
+  });
+
+  const runCheck = async () => {
+    setResult({ kind: "checking" });
+    try {
+      const update = await checkForUpdate();
+      if (!update) {
+        setResult({ kind: "latest" });
+        return;
+      }
+      setResult({ kind: "found", version: update.version });
+      setOpen(false);
+      setAvailable(update);
+    } catch (err) {
+      setResult({ kind: "error", message: errorMessage(err) });
+    }
+  };
+
+  return (
+    <section className="flex flex-col gap-2">
+      <Label>About</Label>
+      <p className="text-sm">
+        Claude Task Manager {info.data ? `version ${info.data.version}` : ""}
+      </p>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={settings.updateCheckOnStartup}
+          disabled={toggle.isPending}
+          onChange={(e) => toggle.mutate(e.target.checked)}
+          className="size-4 accent-foreground"
+        />
+        Check for updates when the app starts
+      </label>
+      <p className="text-xs text-muted-foreground">
+        The check asks GitHub whether a newer release exists. It sends nothing about you and is the
+        only network request this app makes. Updates are only installed when you agree.
+      </p>
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={result.kind === "checking"}
+          onClick={() => void runCheck()}
+        >
+          Check for updates
+        </Button>
+        <span className="text-xs text-muted-foreground">
+          {result.kind === "checking" && "Checking…"}
+          {result.kind === "latest" && "You have the latest version."}
+          {result.kind === "found" && `Version ${result.version} is available.`}
+        </span>
+      </div>
+      {toggle.error && <p className="text-xs text-destructive">{errorMessage(toggle.error)}</p>}
+      {result.kind === "error" && (
+        <p className="text-xs text-destructive">Could not check: {result.message}</p>
       )}
     </section>
   );

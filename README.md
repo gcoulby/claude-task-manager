@@ -4,8 +4,6 @@ A desktop app for macOS and Windows that shows what your Claude Code agents are 
 
 It is read-only, local only and makes no network calls apart from an optional update check.
 
-> Early development. The app currently builds and runs, but does not read sessions yet.
-
 ## Requirements
 
 - Node 20 or newer
@@ -35,6 +33,27 @@ Release build:
 ```sh
 pnpm tauri build
 ```
+
+## Releasing
+
+1. `pnpm bump 0.2.0` sets the version in `package.json`, `Cargo.toml` and `tauri.conf.json`.
+2. Commit, tag `v0.2.0` and push the tag. The release workflow checks the versions match the tag, builds Apple Silicon macOS and Windows installers, signs them for the updater and publishes the release with `latest.json`.
+
+Builds are Apple Silicon only on macOS.
+
+### Updater key
+
+Updates are signed with a key made for this app only:
+
+```sh
+pnpm tauri signer generate -w ~/.tauri/claude-task-manager.key
+gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/claude-task-manager.key
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+```
+
+The public half (`.key.pub`) goes in `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`. Keep a backup of the private key and its password outside this repository: if they are lost, installed copies cannot update and need a manual reinstall. The first version that contains the updater has to be installed by hand.
+
+Local builds do not need the key. Release builds add `src-tauri/tauri.release.conf.json`, which turns on updater artifacts.
 
 ## Unsigned builds
 

@@ -6,12 +6,14 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { CommandPalette } from "@/components/layout/command-palette";
 import { StatusBar } from "@/components/layout/status-bar";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
+import { UpdateDialog } from "@/components/settings/update-dialog";
 import { DETAIL_ID, TaskDetail } from "@/components/tasks/task-detail";
 import { SEARCH_INPUT_ID, TaskFilters } from "@/components/tasks/task-filters";
 import { SearchResults } from "@/components/tasks/search-results";
 import { TaskList } from "@/components/tasks/task-list";
 import { useSearch, useTasks } from "@/features/queries";
 import { useLiveUpdates } from "@/features/use-live-updates";
+import { useStartupUpdateCheck } from "@/features/updates";
 import { useTheme } from "@/features/use-theme";
 import { useUi } from "@/store/ui";
 import type { SearchHit, TaskRow } from "@/types/tasks";
@@ -104,6 +106,7 @@ function useKeyboard(tasks: TaskRow[], hits: SearchHit[] | null) {
 export function AppShell() {
   useTheme();
   useLiveUpdates();
+  useStartupUpdateCheck();
   const filter = useUi((s) => s.filter);
   const searchMode = useUi((s) => s.searchMode);
   const focusEntryId = useUi((s) => s.focusEntryId);
@@ -174,6 +177,7 @@ export function AppShell() {
       <StatusBar />
       <CommandPalette tasks={rows} />
       <SettingsDialog />
+      <UpdateDialog />
     </div>
   );
 }

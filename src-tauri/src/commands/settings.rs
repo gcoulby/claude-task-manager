@@ -33,6 +33,8 @@ pub struct Settings {
     /// Where Claude Code keeps sessions on this machine.
     pub default_projects_root: Option<String>,
     pub stale_minutes: i64,
+    /// Whether to look for a newer version in the background at startup.
+    pub update_check_on_startup: bool,
 }
 
 #[tauri::command]
@@ -44,6 +46,8 @@ pub fn get_settings(state: State<'_, AppState>) -> AppResult<Settings> {
                 .ok()
                 .map(|p| p.to_string_lossy().into_owned()),
             stale_minutes: queries::stale_minutes(conn)?,
+            update_check_on_startup: queries::get_setting(conn, "update_check_on_startup")?
+                .is_none_or(|v| v != "false"),
         })
     })
 }
@@ -75,4 +79,15 @@ pub fn set_stale_minutes(state: State<'_, AppState>, minutes: i64) -> AppResult<
         ));
     }
     state.with_db(|conn| queries::set_setting(conn, "stale_minutes", &minutes.to_string()))
+}
+
+#[tauri::command]
+pub fn set_update_check_on_startup(state: State<'_, AppState>, enabled: bool) -> AppResult<()> {
+    state.with_db(|conn| {
+        queries::set_setting(
+            conn,
+            "update_check_on_startup",
+            if enabled { "true" } else { "false" },
+        )
+    })
 }

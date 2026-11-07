@@ -24,6 +24,7 @@ export const keys = {
   search: (q: string) => ["search", q] as const,
   allSearches: ["search"] as const,
   settings: ["settings"] as const,
+  appInfo: ["app-info"] as const,
 };
 
 /** Staleness depends on the clock, so lists re-check once a minute. */
@@ -75,4 +76,8 @@ export function useSearch(query: string, enabled: boolean) {
     enabled: enabled && q.length > 0,
     placeholderData: keepPreviousData,
   });
+}
+
+export function useAppInfo() {
+  return useQuery({ queryKey: keys.appInfo, queryFn: api.appInfo });
 }

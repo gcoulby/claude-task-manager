@@ -90,6 +90,7 @@ export interface Settings {
   projectsRoot: string | null;
   defaultProjectsRoot: string | null;
   staleMinutes: number;
+  updateCheckOnStartup: boolean;
 }
 
 /** Mirrors `db::queries::ArchiveCounts`. */

@@ -44,6 +44,8 @@ export const api = {
   getSettings: () => call<Settings>("get_settings"),
   setProjectsRoot: (path: string | null) => call<null>("set_projects_root", { path }),
   setStaleMinutes: (minutes: number) => call<null>("set_stale_minutes", { minutes }),
+  setUpdateCheckOnStartup: (enabled: boolean) =>
+    call<null>("set_update_check_on_startup", { enabled }),
 };
 
 /** Event names must match the constants in Rust. */

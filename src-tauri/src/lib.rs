@@ -14,6 +14,12 @@ use state::{AppState, IngestState};
 pub fn run() {
     let result = tauri::Builder::default()
         .setup(|app| {
+            #[cfg(desktop)]
+            {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+                app.handle().plugin(tauri_plugin_process::init())?;
+            }
             let data_dir = app.path().app_data_dir()?;
             let db_path = data_dir.join(db::DB_FILE_NAME);
             // A failed open (for example an archive from a newer version) must
@@ -41,6 +47,7 @@ pub fn run() {
             commands::settings::get_settings,
             commands::settings::set_projects_root,
             commands::settings::set_stale_minutes,
+            commands::settings::set_update_check_on_startup,
             commands::ingest::ingest_state,
             commands::sessions::list_projects,
             commands::sessions::archive_info,
