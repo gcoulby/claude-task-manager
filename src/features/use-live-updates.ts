@@ -10,6 +10,7 @@ export function useLiveUpdates() {
       void queryClient.invalidateQueries({ queryKey: keys.allTaskDetails });
       void queryClient.invalidateQueries({ queryKey: keys.projects });
       void queryClient.invalidateQueries({ queryKey: keys.archiveInfo });
+      void queryClient.invalidateQueries({ queryKey: keys.allSearches });
     };
     const subscriptions = [
       events.onArchiveChanged(refresh),

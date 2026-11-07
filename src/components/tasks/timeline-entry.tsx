@@ -38,7 +38,13 @@ function label(e: EntryRow): string {
 const MONO_KINDS = new Set<EntryRow["kind"]>(["tool_use", "tool_result"]);
 const QUIET_KINDS = new Set<EntryRow["kind"]>(["meta", "system", "compact", "thinking"]);
 
-export function TimelineEntry({ entry }: { entry: EntryRow }) {
+export function TimelineEntry({
+  entry,
+  highlighted = false,
+}: {
+  entry: EntryRow;
+  highlighted?: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
   const full = useEntryText(entry.id, expanded);
   const mono = MONO_KINDS.has(entry.kind);
@@ -55,6 +61,7 @@ export function TimelineEntry({ entry }: { entry: EntryRow }) {
         mono && "border-l-border",
         quiet && "border-l-transparent",
         error && "border-l-red-500 bg-red-500/5",
+        highlighted && "rounded-r-md ring-2 ring-amber-400/60",
       )}
     >
       <div className="mb-1 flex items-center gap-2 text-xs">

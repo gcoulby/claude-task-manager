@@ -361,3 +361,14 @@ mod tests {
         );
     }
 }
+
+/// Most results shown for one search; refine the query for more.
+const SEARCH_LIMIT: i64 = 200;
+
+#[tauri::command]
+pub fn search_entries(
+    state: State<'_, AppState>,
+    query: String,
+) -> AppResult<Vec<queries::SearchHit>> {
+    state.with_db(|conn| queries::search_entries(conn, &query, SEARCH_LIMIT))
+}

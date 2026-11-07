@@ -5,6 +5,7 @@ import type { ArchiveChanged, IngestState } from "@/types/ingest";
 import type {
   ArchiveInfo,
   ProjectSummary,
+  SearchHit,
   Settings,
   TaskDetail,
   TaskFilter,
@@ -37,6 +38,7 @@ export const api = {
   listTasks: (filter: TaskFilter) => call<TaskRow[]>("list_tasks", { filter }),
   getTask: (taskId: string) => call<TaskDetail>("get_task", { taskId }),
   getEntryText: (entryId: number) => call<string>("get_entry_text", { entryId }),
+  searchEntries: (query: string) => call<SearchHit[]>("search_entries", { query }),
   listProjects: () => call<ProjectSummary[]>("list_projects"),
   archiveInfo: () => call<ArchiveInfo>("archive_info"),
   getSettings: () => call<Settings>("get_settings"),

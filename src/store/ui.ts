@@ -3,6 +3,9 @@ import type { TaskFilter, TaskStatus } from "@/types/tasks";
 
 export type Theme = "dark" | "light" | "system";
 
+/** What the search box does: filter task titles, or search inside logs. */
+export type SearchMode = "titles" | "logs";
+
 const THEME_KEY = "ctm.theme";
 
 function readTheme(): Theme {
@@ -18,6 +21,9 @@ function readTheme(): Theme {
 interface UiState {
   filter: TaskFilter;
   selectedTaskId: string | null;
+  /** A timeline entry to scroll to and highlight, from a search hit. */
+  focusEntryId: number | null;
+  searchMode: SearchMode;
   paletteOpen: boolean;
   settingsOpen: boolean;
   theme: Theme;
@@ -27,6 +33,8 @@ interface UiState {
   setQuery: (query: string) => void;
   clearFilters: () => void;
   selectTask: (id: string | null) => void;
+  openSearchHit: (taskId: string, entryId: number) => void;
+  setSearchMode: (mode: SearchMode) => void;
   setPaletteOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
   setTheme: (theme: Theme) => void;
@@ -37,6 +45,8 @@ const emptyFilter: TaskFilter = { statuses: [], project: null, query: null };
 export const useUi = create<UiState>((set) => ({
   filter: emptyFilter,
   selectedTaskId: null,
+  focusEntryId: null,
+  searchMode: "titles",
   paletteOpen: false,
   settingsOpen: false,
   theme: readTheme(),
@@ -52,7 +62,9 @@ export const useUi = create<UiState>((set) => ({
   setProject: (project) => set((s) => ({ filter: { ...s.filter, project } })),
   setQuery: (query) => set((s) => ({ filter: { ...s.filter, query: query || null } })),
   clearFilters: () => set({ filter: emptyFilter }),
-  selectTask: (id) => set({ selectedTaskId: id }),
+  selectTask: (id) => set({ selectedTaskId: id, focusEntryId: null }),
+  openSearchHit: (taskId, entryId) => set({ selectedTaskId: taskId, focusEntryId: entryId }),
+  setSearchMode: (searchMode) => set({ searchMode }),
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setTheme: (theme) => {

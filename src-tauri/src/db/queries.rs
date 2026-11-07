@@ -407,3 +407,99 @@ pub fn archive_counts(conn: &Connection) -> AppResult<ArchiveCounts> {
         },
     )?)
 }
+
+/// Turns free text into a safe FTS5 query: each word quoted (so FTS syntax
+/// characters are literal), all words required, the last one a prefix so
+/// results appear while typing. None if there is nothing to search for.
+pub fn fts_query(input: &str) -> Option<String> {
+    let words: Vec<String> = input
+        .split_whitespace()
+        .map(|w| w.replace('"', ""))
+        .filter(|w| !w.is_empty())
+        .collect();
+    let (last, rest) = words.split_last()?;
+    let mut parts: Vec<String> = rest.iter().map(|w| format!("\"{w}\"")).collect();
+    parts.push(format!("\"{last}\"*"));
+    Some(parts.join(" "))
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchHit {
+    pub entry_id: i64,
+    pub task_id: String,
+    pub task_title: String,
+    pub task_status: String,
+    pub kind: String,
+    pub tool_name: Option<String>,
+    /// Matched words are wrapped in \u{1} and \u{2} for the UI to highlight.
+    pub snippet: String,
+    pub ts: Option<String>,
+}
+
+pub fn search_entries(conn: &Connection, input: &str, limit: i64) -> AppResult<Vec<SearchHit>> {
+    let Some(query) = fts_query(input) else {
+        return Ok(Vec::new());
+    };
+    Ok(conn
+        .prepare(
+            "SELECT e.id, e.task_id, t.title, t.status, e.kind, e.tool_name,
+                    snippet(entries_fts, 0, char(1), char(2), '…', 16), e.ts
+             FROM entries_fts
+             JOIN entries e ON e.id = entries_fts.rowid
+             JOIN tasks t ON t.id = e.task_id
+             WHERE entries_fts MATCH ?1 AND e.kind NOT IN ('ai_title', 'custom_title')
+             ORDER BY rank
+             LIMIT ?2",
+        )?
+        .query_map(params![query, limit], |r| {
+            Ok(SearchHit {
+                entry_id: r.get(0)?,
+                task_id: r.get(1)?,
+                task_title: r.get(2)?,
+                task_status: r.get(3)?,
+                kind: r.get(4)?,
+                tool_name: r.get(5)?,
+                snippet: r.get(6)?,
+                ts: r.get(7)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fts_query_quotes_words_and_prefixes_the_last() {
+        assert_eq!(
+            fts_query("dark mode").as_deref(),
+            Some("\"dark\" \"mode\"*")
+        );
+        assert_eq!(fts_query("  ").as_deref(), None);
+        // FTS syntax in user input is treated as plain text.
+        assert_eq!(
+            fts_query("NOT a-b \"c\" col:x").as_deref(),
+            Some("\"NOT\" \"a-b\" \"c\" \"col:x\"*")
+        );
+    }
+
+    #[test]
+    fn search_finds_entries_with_snippets_and_tolerates_odd_input() {
+        let mut conn = crate::db::open_in_memory();
+        let root =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/projects");
+        crate::ingest::scanner::scan(&mut conn, &root, |_| {}).unwrap();
+
+        let hits = search_entries(&conn, "toggl", 10).unwrap();
+        assert!(!hits.is_empty());
+        assert!(hits.iter().any(|h| h.snippet.contains("\u{1}toggle\u{2}")));
+        assert!(hits.iter().all(|h| !h.task_title.is_empty()));
+
+        for odd in ["\"", "AND", "a OR", "(", "*", "col:", "NEAR(x y)"] {
+            assert!(search_entries(&conn, odd, 10).is_ok(), "{odd}");
+        }
+        assert!(search_entries(&conn, "", 10).unwrap().is_empty());
+    }
+}

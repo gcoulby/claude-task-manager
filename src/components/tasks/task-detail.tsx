@@ -59,6 +59,7 @@ function Centred({ children }: { children: React.ReactNode }) {
 function DetailView({ detail }: { detail: Detail }) {
   const { task, parent, children, entries } = detail;
   const selectTask = useUi((s) => s.selectTask);
+  const focusEntryId = useUi((s) => s.focusEntryId);
   const active = isActive(task.status);
 
   return (
@@ -107,7 +108,7 @@ function DetailView({ detail }: { detail: Detail }) {
         {children.length > 0 && <Subagents tasks={children} onSelect={selectTask} />}
       </header>
       {/* Keyed so each task starts with fresh scroll state. */}
-      <Timeline key={task.id} entries={entries} follow={active} />
+      <Timeline key={task.id} entries={entries} follow={active} focusEntryId={focusEntryId} />
     </div>
   );
 }
@@ -145,7 +146,15 @@ function Subagents({ tasks, onSelect }: { tasks: TaskRow[]; onSelect: (id: strin
   );
 }
 
-function Timeline({ entries, follow }: { entries: EntryRow[]; follow: boolean }) {
+function Timeline({
+  entries,
+  follow,
+  focusEntryId,
+}: {
+  entries: EntryRow[];
+  follow: boolean;
+  focusEntryId: number | null;
+}) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
   const virtualizer = useVirtualizer({
@@ -156,16 +165,26 @@ function Timeline({ entries, follow }: { entries: EntryRow[]; follow: boolean })
   });
 
   const scrolledOnce = useRef(false);
+  const lastFocus = useRef<number | null>(null);
+  const focusIndex = focusEntryId === null ? -1 : entries.findIndex((e) => e.id === focusEntryId);
 
-  // Open at the latest entry, then keep following new ones while the task is
-  // live, unless you have scrolled up to read something.
+  // A search hit scrolls to its entry. Otherwise open at the latest entry,
+  // then keep following new ones while the task is live, unless you have
+  // scrolled up to read something.
   useEffect(() => {
     if (entries.length === 0) return;
+    if (focusIndex >= 0 && focusIndex !== lastFocus.current) {
+      virtualizer.scrollToIndex(focusIndex, { align: "center" });
+      lastFocus.current = focusIndex;
+      scrolledOnce.current = true;
+      atBottom.current = false;
+      return;
+    }
     if (!scrolledOnce.current || (follow && atBottom.current)) {
       virtualizer.scrollToIndex(entries.length - 1, { align: "end" });
       scrolledOnce.current = true;
     }
-  }, [entries.length, follow, virtualizer]);
+  }, [entries.length, follow, focusIndex, virtualizer]);
 
   if (entries.length === 0) {
     return (
@@ -196,7 +215,7 @@ function Timeline({ entries, follow }: { entries: EntryRow[]; follow: boolean })
               className="absolute top-0 left-0 w-full px-4 py-1"
               style={{ transform: `translateY(${item.start}px)` }}
             >
-              <TimelineEntry entry={entry} />
+              <TimelineEntry entry={entry} highlighted={entry.id === focusEntryId} />
             </li>
           );
         })}

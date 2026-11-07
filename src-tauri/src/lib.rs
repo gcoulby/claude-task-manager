@@ -47,6 +47,7 @@ pub fn run() {
             commands::tasks::list_tasks,
             commands::tasks::get_task,
             commands::tasks::get_entry_text,
+            commands::tasks::search_entries,
         ])
         .run(tauri::generate_context!());
 

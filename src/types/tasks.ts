@@ -108,3 +108,15 @@ export interface ArchiveInfo {
   retentionDays: number;
   retentionIsDefault: boolean;
 }
+
+/** Mirrors `db::queries::SearchHit`. Matches in `snippet` are wrapped in \u0001 and \u0002. */
+export interface SearchHit {
+  entryId: number;
+  taskId: string;
+  taskTitle: string;
+  taskStatus: string;
+  kind: EntryKind;
+  toolName: string | null;
+  snippet: string;
+  ts: string | null;
+}

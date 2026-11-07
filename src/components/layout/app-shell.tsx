@@ -8,12 +8,13 @@ import { StatusBar } from "@/components/layout/status-bar";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { DETAIL_ID, TaskDetail } from "@/components/tasks/task-detail";
 import { SEARCH_INPUT_ID, TaskFilters } from "@/components/tasks/task-filters";
+import { SearchResults } from "@/components/tasks/search-results";
 import { TaskList } from "@/components/tasks/task-list";
-import { useTasks } from "@/features/queries";
+import { useSearch, useTasks } from "@/features/queries";
 import { useLiveUpdates } from "@/features/use-live-updates";
 import { useTheme } from "@/features/use-theme";
 import { useUi } from "@/store/ui";
-import type { TaskRow } from "@/types/tasks";
+import type { SearchHit, TaskRow } from "@/types/tasks";
 
 /** Pane sizes are a convenience; if storage is unavailable, use defaults. */
 const layoutStorage = {
@@ -44,7 +45,7 @@ function isTyping(target: EventTarget | null): boolean {
 }
 
 /** Global keys: ⌘/Ctrl+K palette, / filter, arrows move, Enter opens. */
-function useKeyboard(tasks: TaskRow[]) {
+function useKeyboard(tasks: TaskRow[], hits: SearchHit[] | null) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const ui = useUi.getState();
@@ -60,6 +61,18 @@ function useKeyboard(tasks: TaskRow[]) {
       if (e.key === "/") {
         e.preventDefault();
         document.getElementById(SEARCH_INPUT_ID)?.focus();
+        return;
+      }
+      if ((e.key === "ArrowDown" || e.key === "ArrowUp") && hits) {
+        if (hits.length === 0) return;
+        e.preventDefault();
+        const index = hits.findIndex((h) => h.entryId === ui.focusEntryId);
+        const next =
+          index < 0
+            ? 0
+            : Math.min(hits.length - 1, Math.max(0, index + (e.key === "ArrowDown" ? 1 : -1)));
+        const hit = hits[next];
+        if (hit) ui.openSearchHit(hit.taskId, hit.entryId);
         return;
       }
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -85,18 +98,23 @@ function useKeyboard(tasks: TaskRow[]) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tasks]);
+  }, [tasks, hits]);
 }
 
 export function AppShell() {
   useTheme();
   useLiveUpdates();
   const filter = useUi((s) => s.filter);
+  const searchMode = useUi((s) => s.searchMode);
+  const focusEntryId = useUi((s) => s.focusEntryId);
   const setPaletteOpen = useUi((s) => s.setPaletteOpen);
   const setSettingsOpen = useUi((s) => s.setSettingsOpen);
-  const tasks = useTasks(filter);
+  const searchingLogs = searchMode === "logs";
+  // In log search the text box searches logs, so it must not also filter titles.
+  const tasks = useTasks(searchingLogs ? { ...filter, query: null } : filter);
   const rows = tasks.data ?? [];
-  useKeyboard(rows);
+  const search = useSearch(filter.query ?? "", searchingLogs);
+  useKeyboard(rows, searchingLogs ? (search.data ?? []) : null);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "main-panes",
     storage: layoutStorage,
@@ -134,7 +152,17 @@ export function AppShell() {
           <div className="flex h-full flex-col">
             <TaskFilters />
             <div className="min-h-0 flex-1">
-              <TaskList tasks={tasks.data} isLoading={tasks.isLoading} error={tasks.error} />
+              {searchingLogs ? (
+                <SearchResults
+                  query={filter.query ?? ""}
+                  hits={search.data}
+                  isLoading={search.isLoading}
+                  error={search.error}
+                  activeEntryId={focusEntryId}
+                />
+              ) : (
+                <TaskList tasks={tasks.data} isLoading={tasks.isLoading} error={tasks.error} />
+              )}
             </div>
           </div>
         </ResizablePanel>

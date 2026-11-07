@@ -21,6 +21,8 @@ export const keys = {
   entryText: (id: number) => ["entry-text", id] as const,
   projects: ["projects"] as const,
   archiveInfo: ["archive-info"] as const,
+  search: (q: string) => ["search", q] as const,
+  allSearches: ["search"] as const,
   settings: ["settings"] as const,
 };
 
@@ -63,4 +65,14 @@ export function useSettings() {
 
 export function useArchiveInfo() {
   return useQuery({ queryKey: keys.archiveInfo, queryFn: api.archiveInfo });
+}
+
+export function useSearch(query: string, enabled: boolean) {
+  const q = query.trim();
+  return useQuery({
+    queryKey: keys.search(q),
+    queryFn: () => api.searchEntries(q),
+    enabled: enabled && q.length > 0,
+    placeholderData: keepPreviousData,
+  });
 }
