@@ -5,7 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, StatusDot } from "@/components/tasks/status-badge";
 import { TimelineEntry } from "@/components/tasks/timeline-entry";
 import { useTask } from "@/features/queries";
-import { formatFull, formatWhen, isActive, taskDuration } from "@/lib/format";
+import { formatFull, formatTokens, formatWhen, isActive, taskDuration } from "@/lib/format";
 import { errorMessage } from "@/lib/tauri";
 import { useUi } from "@/store/ui";
 import type { EntryRow, TaskDetail as Detail, TaskRow } from "@/types/tasks";
@@ -57,7 +57,7 @@ function Centred({ children }: { children: React.ReactNode }) {
 }
 
 function DetailView({ detail }: { detail: Detail }) {
-  const { task, parent, children, entries } = detail;
+  const { task, parent, children, entries, tokens } = detail;
   const selectTask = useUi((s) => s.selectTask);
   const focusEntryId = useUi((s) => s.focusEntryId);
   const active = isActive(task.status);
@@ -97,6 +97,17 @@ function DetailView({ detail }: { detail: Detail }) {
             <span title={formatFull(task.lastActivityAt)}>{formatWhen(task.lastActivityAt)}</span>
           </Meta>
           <Meta label="Entries">{task.entryCount}</Meta>
+          {tokens.messages > 0 && (
+            <Meta label="Tokens">
+              <span
+                title={`Input ${tokens.input.toLocaleString("en-GB")}, cache read ${tokens.cacheRead.toLocaleString("en-GB")}, cache write ${tokens.cacheWrite.toLocaleString("en-GB")}${children.length > 0 ? ". Includes subagents." : ""}`}
+              >
+                {formatTokens(tokens.output)} out ·{" "}
+                {formatTokens(tokens.input + tokens.cacheRead + tokens.cacheWrite)} in (
+                {formatTokens(tokens.cacheRead)} from cache)
+              </span>
+            </Meta>
+          )}
         </dl>
         {task.sourceMissing && (
           <p className="flex items-start gap-2 rounded-md bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-200">

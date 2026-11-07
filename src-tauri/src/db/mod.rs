@@ -24,6 +24,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "replaced_sources",
         include_str!("migrations/0003_replaced_sources.sql"),
     ),
+    (
+        4,
+        "token_usage",
+        include_str!("migrations/0004_token_usage.sql"),
+    ),
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS[MIGRATIONS.len() - 1].0;

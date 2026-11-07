@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { CommandPalette } from "@/components/layout/command-palette";
 import { StatusBar } from "@/components/layout/status-bar";
+import { UsageBar } from "@/components/layout/usage-bar";
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { UpdateDialog } from "@/components/settings/update-dialog";
 import { DETAIL_ID, TaskDetail } from "@/components/tasks/task-detail";
@@ -130,7 +131,8 @@ export function AppShell() {
         <span className="text-xs text-muted-foreground">
           {tasks.data ? `${rows.length} ${rows.length === 1 ? "task" : "tasks"}` : ""}
         </span>
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex min-w-0 items-center gap-1">
+          <UsageBar />
           <Button variant="ghost" size="sm" onClick={() => setPaletteOpen(true)}>
             <CommandIcon />
             <span className="text-xs">K</span>

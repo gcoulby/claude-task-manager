@@ -131,8 +131,10 @@ pub fn insert_entry(
     let mut stmt = conn.prepare_cached(
         "INSERT OR IGNORE INTO entries (source_id, byte_offset, session_id, agent_id, uuid,
              parent_uuid, kind, tool_name, tool_use_id, message_id, stop_reason, is_error, cwd,
-             summary, raw_json, ts)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+             summary, raw_json, ts, input_tokens, output_tokens, cache_read_tokens,
+             cache_write_tokens)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
+                 ?19, ?20)",
     )?;
     let n = stmt.execute(params![
         source_id,
@@ -151,6 +153,10 @@ pub fn insert_entry(
         e.summary,
         e.raw_json,
         e.ts,
+        e.tokens.map(|t| t.input),
+        e.tokens.map(|t| t.output),
+        e.tokens.map(|t| t.cache_read),
+        e.tokens.map(|t| t.cache_write),
     ])?;
     Ok(n > 0)
 }
@@ -362,7 +368,9 @@ pub fn all_raw_entries(conn: &Connection) -> AppResult<Vec<(i64, String)>> {
 pub fn update_parsed_entry(conn: &Connection, id: i64, e: &ParsedEntry) -> AppResult<()> {
     let mut stmt = conn.prepare_cached(
         "UPDATE entries SET kind = ?2, tool_name = ?3, tool_use_id = ?4, message_id = ?5,
-             stop_reason = ?6, is_error = ?7, cwd = ?8, summary = ?9, raw_json = ?10
+             stop_reason = ?6, is_error = ?7, cwd = ?8, summary = ?9, raw_json = ?10,
+             input_tokens = ?11, output_tokens = ?12, cache_read_tokens = ?13,
+             cache_write_tokens = ?14
          WHERE id = ?1",
     )?;
     stmt.execute(params![
@@ -376,6 +384,10 @@ pub fn update_parsed_entry(conn: &Connection, id: i64, e: &ParsedEntry) -> AppRe
         e.cwd,
         e.summary,
         e.raw_json,
+        e.tokens.map(|t| t.input),
+        e.tokens.map(|t| t.output),
+        e.tokens.map(|t| t.cache_read),
+        e.tokens.map(|t| t.cache_write),
     ])?;
     Ok(())
 }
@@ -472,6 +484,53 @@ mod tests {
     use super::*;
 
     #[test]
+    fn split_responses_count_once() {
+        let mut conn = crate::db::open_in_memory();
+        let root =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/projects");
+        crate::ingest::scanner::scan(&mut conn, &root, |_| {}).unwrap();
+        let distinct: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT message_id) FROM entries WHERE output_tokens IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let entries: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM entries WHERE output_tokens IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            entries > distinct,
+            "fixtures should include split responses"
+        );
+
+        let all = token_totals_since(&conn, None).unwrap();
+        // Every fixture response reports 10 input and 20 output tokens.
+        assert_eq!(all.messages, distinct);
+        assert_eq!((all.input, all.output), (10 * distinct, 20 * distinct));
+
+        let none = token_totals_since(&conn, Some("2099-01-01T00:00:00Z")).unwrap();
+        assert_eq!(none.messages, 0);
+
+        let first_task: String = conn
+            .query_row(
+                "SELECT id FROM tasks WHERE session_id LIKE '%001' AND seq = 0",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        // Three own responses plus the subagent's two.
+        assert_eq!(
+            token_totals_for_task(&conn, &first_task).unwrap().messages,
+            5
+        );
+    }
+
+    #[test]
     fn fts_query_quotes_words_and_prefixes_the_last() {
         assert_eq!(
             fts_query("dark mode").as_deref(),
@@ -502,4 +561,58 @@ mod tests {
         }
         assert!(search_entries(&conn, "", 10).unwrap().is_empty());
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenTotals {
+    pub input: i64,
+    pub output: i64,
+    pub cache_read: i64,
+    pub cache_write: i64,
+    /// Model responses counted.
+    pub messages: i64,
+}
+
+/// One row per model response: a response split across entries repeats its
+/// counts (output grows as it streams), so take the maximum of each.
+const MESSAGES_CTE: &str = "
+    WITH messages AS (
+        SELECT message_id, MAX(ts) AS ts, MAX(task_id) AS task_id,
+               MAX(input_tokens) AS input, MAX(output_tokens) AS output,
+               MAX(cache_read_tokens) AS cache_read, MAX(cache_write_tokens) AS cache_write
+        FROM entries
+        WHERE message_id IS NOT NULL AND output_tokens IS NOT NULL
+        GROUP BY message_id
+    )";
+
+fn totals_row(r: &rusqlite::Row) -> rusqlite::Result<TokenTotals> {
+    Ok(TokenTotals {
+        input: r.get::<_, Option<i64>>(0)?.unwrap_or(0),
+        output: r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+        cache_read: r.get::<_, Option<i64>>(2)?.unwrap_or(0),
+        cache_write: r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+        messages: r.get(4)?,
+    })
+}
+
+/// Totals for responses at or after `since` (an ISO timestamp), or all.
+pub fn token_totals_since(conn: &Connection, since: Option<&str>) -> AppResult<TokenTotals> {
+    let sql = format!(
+        "{MESSAGES_CTE}
+         SELECT SUM(input), SUM(output), SUM(cache_read), SUM(cache_write), COUNT(*)
+         FROM messages WHERE ?1 IS NULL OR ts >= ?1"
+    );
+    Ok(conn.query_row(&sql, [since], totals_row)?)
+}
+
+/// Totals for one task, including any subagent runs it launched.
+pub fn token_totals_for_task(conn: &Connection, task_id: &str) -> AppResult<TokenTotals> {
+    let sql = format!(
+        "{MESSAGES_CTE}
+         SELECT SUM(input), SUM(output), SUM(cache_read), SUM(cache_write), COUNT(*)
+         FROM messages
+         WHERE task_id = ?1 OR task_id IN (SELECT id FROM tasks WHERE parent_task_id = ?1)"
+    );
+    Ok(conn.query_row(&sql, [task_id], totals_row)?)
 }

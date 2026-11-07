@@ -1,5 +1,6 @@
 import { keepPreviousData, QueryClient, useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/tauri";
+import { useEffect } from "react";
+import { api, events } from "@/lib/tauri";
 import type { TaskFilter } from "@/types/tasks";
 
 export const queryClient = new QueryClient({
@@ -25,6 +26,8 @@ export const keys = {
   allSearches: ["search"] as const,
   settings: ["settings"] as const,
   appInfo: ["app-info"] as const,
+  planUsage: ["plan-usage"] as const,
+  tokens: ["tokens"] as const,
 };
 
 /** Staleness depends on the clock, so lists re-check once a minute. */
@@ -80,4 +83,37 @@ export function useSearch(query: string, enabled: boolean) {
 
 export function useAppInfo() {
   return useQuery({ queryKey: keys.appInfo, queryFn: api.appInfo });
+}
+
+/** Latest /usage result: fetched once, then pushed by the usage thread. */
+export function usePlanUsage() {
+  useEffect(() => {
+    const unlisten = events.onPlanUsage((usage) => queryClient.setQueryData(keys.planUsage, usage));
+    return () => void unlisten.then((fn) => fn());
+  }, []);
+  return useQuery({ queryKey: keys.planUsage, queryFn: api.getPlanUsage });
+}
+
+function startOfToday(): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/** Tokens since local midnight and over the last 7 days. */
+export function useTokenUsage() {
+  return useQuery({
+    queryKey: keys.tokens,
+    queryFn: async () => {
+      const week = startOfToday();
+      week.setDate(week.getDate() - 6);
+      const rows = await api.tokenUsage([
+        { key: "today", since: startOfToday().toISOString() },
+        { key: "week", since: week.toISOString() },
+      ]);
+      return Object.fromEntries(rows.map((r) => [r.key, r.totals]));
+    },
+    // Ranges move at midnight even when nothing new is archived.
+    refetchInterval: CLOCK_REFRESH_MS,
+  });
 }

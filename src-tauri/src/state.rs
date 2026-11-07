@@ -10,6 +10,7 @@ use serde::Serialize;
 use crate::error::{AppError, AppResult};
 use crate::ingest::runner::IngestMsg;
 use crate::ingest::scanner::{ScanProgress, ScanSummary};
+use crate::usage::{PlanUsage, UsageMsg};
 
 pub struct AppState {
     pub db_path: PathBuf,
@@ -19,6 +20,9 @@ pub struct AppState {
     pub ingest: Mutex<IngestState>,
     /// Wakes the ingest thread, for example to rescan after a settings change.
     pub ingest_tx: Sender<IngestMsg>,
+    /// The latest `/usage` result, if one has been fetched.
+    pub plan_usage: Mutex<Option<PlanUsage>>,
+    pub usage_tx: Sender<UsageMsg>,
 }
 
 impl AppState {

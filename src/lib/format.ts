@@ -61,3 +61,20 @@ export function formatFull(iso: string | null): string {
 export function isActive(status: TaskStatus): boolean {
   return status === "running" || status === "waiting";
 }
+
+/** 950, 12.3k, 4.5M, 1.2B. */
+export function formatTokens(n: number): string {
+  if (n < 1000) return String(n);
+  const units: [number, string][] = [
+    [1e9, "B"],
+    [1e6, "M"],
+    [1e3, "k"],
+  ];
+  for (const [size, suffix] of units) {
+    if (n >= size) {
+      const v = n / size;
+      return `${v >= 100 ? Math.round(v) : v.toFixed(1).replace(/\.0$/, "")}${suffix}`;
+    }
+  }
+  return String(n);
+}

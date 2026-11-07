@@ -3,6 +3,7 @@ pub mod db;
 pub mod error;
 pub mod ingest;
 mod state;
+pub mod usage;
 
 use std::sync::{Mutex, mpsc};
 
@@ -30,15 +31,19 @@ pub fn run() {
             };
             let can_ingest = conn.is_some();
             let (ingest_tx, ingest_rx) = mpsc::channel();
+            let (usage_tx, usage_rx) = mpsc::channel();
             app.manage(AppState {
                 db_path,
                 db: Mutex::new(conn),
                 db_error,
                 ingest: Mutex::new(IngestState::Idle),
                 ingest_tx: ingest_tx.clone(),
+                plan_usage: Mutex::new(None),
+                usage_tx,
             });
             if can_ingest {
                 ingest::runner::spawn(app.handle().clone(), ingest_tx, ingest_rx);
+                usage::spawn(app.handle().clone(), usage_rx);
             }
             Ok(())
         })
@@ -48,6 +53,10 @@ pub fn run() {
             commands::settings::set_projects_root,
             commands::settings::set_stale_minutes,
             commands::settings::set_update_check_on_startup,
+            commands::settings::set_plan_usage,
+            commands::usage::get_plan_usage,
+            commands::usage::refresh_plan_usage,
+            commands::usage::token_usage,
             commands::ingest::ingest_state,
             commands::sessions::list_projects,
             commands::sessions::archive_info,

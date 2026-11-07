@@ -196,6 +196,8 @@ pub struct TaskDetail {
     pub children: Vec<TaskRow>,
     pub entries: Vec<EntryRow>,
     pub source_path: Option<String>,
+    /// This task's responses plus any subagent runs it launched.
+    pub tokens: queries::TokenTotals,
 }
 
 #[tauri::command]
@@ -249,7 +251,9 @@ pub fn get_task(state: State<'_, AppState>, task_id: String) -> AppResult<TaskDe
             })
             .collect();
         let source_path = queries::main_source_path(conn, &task.session_id)?;
+        let tokens = queries::token_totals_for_task(conn, &task_id)?;
         Ok(TaskDetail {
+            tokens,
             task,
             parent,
             children,

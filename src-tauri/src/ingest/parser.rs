@@ -10,7 +10,7 @@ use super::redact::redact;
 
 /// Bump when classification or summaries change, so stored entries are
 /// re-parsed from their raw JSON.
-pub const PARSER_VERSION: i64 = 2;
+pub const PARSER_VERSION: i64 = 3;
 
 /// Longest summary kept for lists and search. The full text stays in raw_json.
 pub const SUMMARY_MAX_CHARS: usize = 4000;
@@ -103,6 +103,27 @@ pub struct ParsedEntry {
     pub summary: String,
     /// The original line with embedded binary data removed.
     pub raw_json: String,
+    /// From `message.usage` on assistant entries.
+    pub tokens: Option<TokenCounts>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TokenCounts {
+    pub input: i64,
+    pub output: i64,
+    pub cache_read: i64,
+    pub cache_write: i64,
+}
+
+fn token_counts(message: Option<&Map<String, Value>>) -> Option<TokenCounts> {
+    let usage = message?.get("usage")?.as_object()?;
+    let n = |k: &str| usage.get(k).and_then(Value::as_i64).unwrap_or(0);
+    Some(TokenCounts {
+        input: n("input_tokens"),
+        output: n("output_tokens"),
+        cache_read: n("cache_read_input_tokens"),
+        cache_write: n("cache_creation_input_tokens"),
+    })
 }
 
 #[derive(Debug, PartialEq)]
@@ -146,6 +167,11 @@ pub fn parse_line(line: &[u8]) -> Parsed {
         cwd: str_field(obj, "cwd"),
         ts: str_field(obj, "timestamp"),
         summary: finish_summary(&classified.summary),
+        tokens: if obj.get("type").and_then(Value::as_str) == Some("assistant") {
+            token_counts(message)
+        } else {
+            None
+        },
         raw_json,
     }))
 }
@@ -796,6 +822,25 @@ mod tests {
             json!({}),
         ));
         assert_eq!(own.summary, "<ide_x> is a tag I made");
+    }
+
+    #[test]
+    fn assistant_entries_carry_token_counts() {
+        let e = entry(
+            json!({"type":"assistant","message":{"id":"m","content":[{"type":"text","text":"hi"}],
+            "usage":{"input_tokens":3,"output_tokens":40,"cache_read_input_tokens":1000,"cache_creation_input_tokens":20}}}),
+        );
+        assert_eq!(
+            e.tokens,
+            Some(TokenCounts {
+                input: 3,
+                output: 40,
+                cache_read: 1000,
+                cache_write: 20
+            })
+        );
+        let u = entry(user(json!("hello"), json!({})));
+        assert_eq!(u.tokens, None);
     }
 
     #[test]

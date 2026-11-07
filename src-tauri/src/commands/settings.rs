@@ -35,6 +35,10 @@ pub struct Settings {
     pub stale_minutes: i64,
     /// Whether to look for a newer version in the background at startup.
     pub update_check_on_startup: bool,
+    pub plan_usage_enabled: bool,
+    pub plan_usage_minutes: i64,
+    /// Override for the `claude` binary; None means search the usual places.
+    pub claude_path: Option<String>,
 }
 
 #[tauri::command]
@@ -48,6 +52,12 @@ pub fn get_settings(state: State<'_, AppState>) -> AppResult<Settings> {
             stale_minutes: queries::stale_minutes(conn)?,
             update_check_on_startup: queries::get_setting(conn, "update_check_on_startup")?
                 .is_none_or(|v| v != "false"),
+            plan_usage_enabled: queries::get_setting(conn, "plan_usage_enabled")?
+                .is_none_or(|v| v != "false"),
+            plan_usage_minutes: queries::get_setting(conn, "plan_usage_minutes")?
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(crate::usage::DEFAULT_INTERVAL_MINUTES),
+            claude_path: queries::get_setting(conn, "claude_path")?,
         })
     })
 }
@@ -90,4 +100,42 @@ pub fn set_update_check_on_startup(state: State<'_, AppState>, enabled: bool) ->
             if enabled { "true" } else { "false" },
         )
     })
+}
+
+/// Saves the plan usage settings and re-checks straight away.
+#[tauri::command]
+pub fn set_plan_usage(
+    state: State<'_, AppState>,
+    enabled: bool,
+    minutes: i64,
+    claude_path: Option<String>,
+) -> AppResult<()> {
+    if !(1..=24 * 60).contains(&minutes) {
+        return Err(AppError::Other(
+            "Choose between 1 minute and 24 hours.".into(),
+        ));
+    }
+    let claude_path = claude_path
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty());
+    if let Some(p) = &claude_path
+        && !Path::new(p).is_file()
+    {
+        return Err(AppError::Other(format!("There is no file at {p}.")));
+    }
+    state.with_db(|conn| {
+        queries::set_setting(
+            conn,
+            "plan_usage_enabled",
+            if enabled { "true" } else { "false" },
+        )?;
+        queries::set_setting(conn, "plan_usage_minutes", &minutes.to_string())?;
+        match &claude_path {
+            Some(p) => queries::set_setting(conn, "claude_path", p),
+            None => queries::delete_setting(conn, "claude_path"),
+        }
+    })?;
+    // The checker may be asleep for a while; wake it so changes apply now.
+    let _ = state.usage_tx.send(crate::usage::UsageMsg::Refresh);
+    Ok(())
 }

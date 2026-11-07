@@ -10,7 +10,14 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { keys, queryClient, useAppInfo, useArchiveInfo, useSettings } from "@/features/queries";
+import {
+  keys,
+  queryClient,
+  useAppInfo,
+  useArchiveInfo,
+  usePlanUsage,
+  useSettings,
+} from "@/features/queries";
 import { checkForUpdate, useUpdates } from "@/features/updates";
 import { api, errorMessage } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
@@ -141,6 +148,8 @@ function SettingsForm({ settings }: { settings: Settings }) {
 
       <ArchiveSection />
 
+      <UsageSection settings={settings} />
+
       <AboutSection settings={settings} />
 
       <section className="flex flex-col gap-2">
@@ -249,8 +258,9 @@ function AboutSection({ settings }: { settings: Settings }) {
         Check for updates when the app starts
       </label>
       <p className="text-xs text-muted-foreground">
-        The check asks GitHub whether a newer release exists. It sends nothing about you and is the
-        only network request this app makes. Updates are only installed when you agree.
+        The check asks GitHub whether a newer release exists and sends nothing about you. It is the
+        only network request this app makes itself; plan usage is fetched by Claude Code. Updates
+        are only installed when you agree.
       </p>
       <div className="flex items-center gap-2">
         <Button
@@ -271,6 +281,84 @@ function AboutSection({ settings }: { settings: Settings }) {
       {result.kind === "error" && (
         <p className="text-xs text-destructive">Could not check: {result.message}</p>
       )}
+    </section>
+  );
+}
+
+function UsageSection({ settings }: { settings: Settings }) {
+  const plan = usePlanUsage();
+  const [enabled, setEnabled] = useState(settings.planUsageEnabled);
+  const [minutes, setMinutes] = useState(String(settings.planUsageMinutes));
+  const [path, setPath] = useState(settings.claudePath ?? "");
+  const save = useMutation({
+    mutationFn: () => api.setPlanUsage(enabled, Number.parseInt(minutes, 10), path.trim() || null),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.settings }),
+  });
+  const minutesNumber = Number.parseInt(minutes, 10);
+  const changed =
+    enabled !== settings.planUsageEnabled ||
+    minutesNumber !== settings.planUsageMinutes ||
+    (path.trim() || null) !== settings.claudePath;
+
+  return (
+    <section className="flex flex-col gap-2">
+      <Label>Plan usage</Label>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => setEnabled(e.target.checked)}
+          className="size-4 accent-foreground"
+        />
+        Show plan limits from Claude Code&apos;s /usage
+      </label>
+      <p className="text-xs text-muted-foreground">
+        Runs <code>claude -p /usage</code> in the background. It calls no model, costs nothing and
+        saves no session. Claude Code fetches the figures from Anthropic.
+      </p>
+      <div className="flex items-center gap-2 text-sm">
+        <span className="text-muted-foreground">Every</span>
+        <Input
+          type="number"
+          min={1}
+          max={1440}
+          value={minutes}
+          onChange={(e) => setMinutes(e.target.value)}
+          className="w-20"
+          aria-label="Minutes between checks"
+        />
+        <span className="text-muted-foreground">minutes</span>
+      </div>
+      <Label htmlFor="claude-path" className="text-xs font-normal text-muted-foreground">
+        Claude Code program (leave empty to find it automatically)
+      </Label>
+      <Input
+        id="claude-path"
+        value={path}
+        onChange={(e) => setPath(e.target.value)}
+        placeholder={plan.data?.binary ?? "Not found yet"}
+        spellCheck={false}
+      />
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          disabled={save.isPending || !changed || !Number.isFinite(minutesNumber)}
+          onClick={() => save.mutate()}
+        >
+          Save
+        </Button>
+        {plan.data && (
+          <span className="text-xs text-muted-foreground">
+            {plan.data.error ?? "Working."} Last checked{" "}
+            {new Date(plan.data.fetchedAtMs).toLocaleTimeString("en-GB", {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+            .
+          </span>
+        )}
+      </div>
+      {save.error && <p className="text-xs text-destructive">{errorMessage(save.error)}</p>}
     </section>
   );
 }

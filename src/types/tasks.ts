@@ -76,6 +76,7 @@ export interface TaskDetail {
   children: TaskRow[];
   entries: EntryRow[];
   sourcePath: string | null;
+  tokens: TokenTotals;
 }
 
 /** Mirrors `commands::sessions::ProjectSummary`. */
@@ -91,6 +92,9 @@ export interface Settings {
   defaultProjectsRoot: string | null;
   staleMinutes: number;
   updateCheckOnStartup: boolean;
+  planUsageEnabled: boolean;
+  planUsageMinutes: number;
+  claudePath: string | null;
 }
 
 /** Mirrors `db::queries::ArchiveCounts`. */
@@ -120,4 +124,35 @@ export interface SearchHit {
   toolName: string | null;
   snippet: string;
   ts: string | null;
+}
+
+/** Mirrors `db::queries::TokenTotals`. */
+export interface TokenTotals {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  messages: number;
+}
+
+/** Mirrors `commands::usage::TokenRangeTotals`. */
+export interface TokenRangeTotals {
+  key: string;
+  totals: TokenTotals;
+}
+
+/** Mirrors `usage::Meter`. */
+export interface Meter {
+  label: string;
+  percent: number;
+  resets: string | null;
+}
+
+/** Mirrors `usage::PlanUsage`. */
+export interface PlanUsage {
+  fetchedAtMs: number;
+  meters: Meter[];
+  raw: string;
+  error: string | null;
+  binary: string | null;
 }

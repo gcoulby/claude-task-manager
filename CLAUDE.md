@@ -6,7 +6,7 @@ A desktop app (Tauri v2, macOS and Windows) that shows what my Claude Code agent
 
 The problem it solves: I run several agents and sessions and have no single place to see what is running, what finished, what is stuck and what happened. Claude Code also deletes old session files after 30 days by default, so history disappears.
 
-Single user, local only, no accounts. The only network call is the update check (see "Auto-update").
+Single user, local only, no accounts. The only network call the app makes itself is the update check (see "Auto-update"). Plan usage comes from running `claude -p /usage --no-session-persistence` in the background, so Claude Code makes that request, not the app.
 
 Read-only in v1. Launching or controlling agents is out of scope.
 
@@ -45,7 +45,15 @@ Do not add Electron, a Node backend, or an ORM. Keep the Rust side thin and bori
 
 ### Out of scope unless asked
 
-Launching, stopping or controlling agents, editing anything under `~/.claude/`, remote or multi-machine views, notifications, cost tracking. Do not build these speculatively.
+Launching, stopping or controlling agents, editing anything under `~/.claude/`, remote or multi-machine views, cost tracking in money. Do not build these speculatively.
+
+### Agreed additions (in this order)
+
+1. **Usage.** Token totals from transcripts (count each `message.id` once, using its maxima), and plan limits from `claude -p /usage --no-session-persistence`, parsed tolerantly with the raw text as a fallback.
+2. **Notifications.** Tasks needing action pin to the top, with an OS notification when one starts waiting.
+3. **Open where it is running.** Find the live `claude` process for a session (by cwd), raise its VS Code window, terminal or the Claude app, and use process liveness as a status signal. Reading the process list is allowed; controlling it is not.
+4. **Hooks (optional).** Show a snippet the user can add to their own Claude Code settings so `Notification` and `Stop` events reach the app, making "waiting for permission" a fact rather than a guess. The app never edits `~/.claude/settings.json` itself.
+5. **Remote control** stays with Claude Code's own Remote Control for now.
 
 ## Architecture
 

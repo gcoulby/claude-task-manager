@@ -4,12 +4,14 @@ import type { AppError, AppInfo } from "@/types/app";
 import type { ArchiveChanged, IngestState } from "@/types/ingest";
 import type {
   ArchiveInfo,
+  PlanUsage,
   ProjectSummary,
   SearchHit,
   Settings,
   TaskDetail,
   TaskFilter,
   TaskRow,
+  TokenRangeTotals,
 } from "@/types/tasks";
 
 function isAppError(value: unknown): value is AppError {
@@ -44,6 +46,12 @@ export const api = {
   getSettings: () => call<Settings>("get_settings"),
   setProjectsRoot: (path: string | null) => call<null>("set_projects_root", { path }),
   setStaleMinutes: (minutes: number) => call<null>("set_stale_minutes", { minutes }),
+  getPlanUsage: () => call<PlanUsage | null>("get_plan_usage"),
+  refreshPlanUsage: () => call<null>("refresh_plan_usage"),
+  tokenUsage: (ranges: { key: string; since: string | null }[]) =>
+    call<TokenRangeTotals[]>("token_usage", { ranges }),
+  setPlanUsage: (enabled: boolean, minutes: number, claudePath: string | null) =>
+    call<null>("set_plan_usage", { enabled, minutes, claudePath }),
   setUpdateCheckOnStartup: (enabled: boolean) =>
     call<null>("set_update_check_on_startup", { enabled }),
 };
@@ -54,6 +62,8 @@ export const events = {
     listen<IngestState>("ingest://state", (e) => handler(e.payload)),
   onArchiveChanged: (handler: (change: ArchiveChanged) => void): Promise<UnlistenFn> =>
     listen<ArchiveChanged>("archive://changed", (e) => handler(e.payload)),
+  onPlanUsage: (handler: (usage: PlanUsage) => void): Promise<UnlistenFn> =>
+    listen<PlanUsage>("usage://plan", (e) => handler(e.payload)),
 };
 
 export function errorMessage(err: unknown): string {
